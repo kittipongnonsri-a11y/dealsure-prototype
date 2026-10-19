@@ -80,7 +80,7 @@ check('เปลี่ยนเพจ → ป้ายตรวจแล้ว�
 
 print('5) ร้านตัวอย่างมีช่องทางโซเชียลตัวอย่าง')
 gold = [x for x in ANON.ok('/shops')['shops'] if x['stats']['level'] == 'gold'][0]
-check('ร้านทองตัวอย่าง: 6 ช่อง · Facebook ตรวจแล้ว · ลิงก์ .example', len(gold['socials']) >= 6 and any(x['key'] == 'facebook' and x['verified'] for x in gold['socials'])
+check('Gold ตัวอย่าง: 6 ช่อง · Facebook ตรวจแล้ว · ลิงก์ .example', len(gold['socials']) >= 6 and any(x['key'] == 'facebook' and x['verified'] for x in gold['socials'])
       and any(x['key'] == 'website' and '.example' in x['url'] for x in gold['socials']), gold['socials'])
 
 
@@ -138,8 +138,8 @@ hp = ANON.ok(f'/shops/{host["id"]}')['reviews_top']; hc = hp['summary']['counts'
 check('เจ้าของที่พักตัวอย่าง: มีทั้งรีวิวสินค้าและที่พัก + มีรูป + มีติชม', hc['goods'] > 0 and hc['stay'] > 0 and hc['photos'] > 0 and hc['low'] > 0, hc)
 check('รีวิวตัวอย่างติดป้าย is_demo + ข้อความ "(รีวิวตัวอย่าง)" สำหรับรีวิวใหม่', all(r['is_demo'] for r in hp['items']))
 gp = ANON.ok(f'/shops/{gold["id"]}')['reviews_top']
-check('ร้านทองตัวอย่าง: 3 อันดับแรกมีรีวิวติชม (≤2 ดาว) ล่าสุด', any(r['stars'] <= 2 and r['pinned'] for r in gp['items']), [r['stars'] for r in gp['items']])
-check('ร้านทองยังเป็นร้านทอง', ANON.ok(f'/shops/{gold["id"]}')['stats']['level'] == 'gold')
+check('Gold ตัวอย่าง: 3 อันดับแรกมีรีวิวติชม (≤2 ดาว) ล่าสุด', any(r['stars'] <= 2 and r['pinned'] for r in gp['items']), [r['stars'] for r in gp['items']])
+check('ร้านยังเป็น Gold', ANON.ok(f'/shops/{gold["id"]}')['stats']['level'] == 'gold')
 
 print(f'\nผลรวม: ผ่าน {ok} / ไม่ผ่าน {fail}')
 sys.exit(1 if fail else 0)

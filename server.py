@@ -34,8 +34,8 @@ LOST_FLAG_N, LOST_FLAG_DAYS = 3, 90        # ผู้ซื้อแพ้ข�
 ID_REQUIRED_OVER = 3000
 NEW_LIMIT = 5000
 LEVELS = [  # key, name, min deals, min stars, max dispute rate, limit/deal
-    ('gold', 'ร้านทอง', 100, 4.7, 0.02, 50000),
-    ('silver', 'ร้านเงิน', 20, 4.5, 0.05, 20000),
+    ('gold', 'Gold', 100, 4.7, 0.02, 50000),
+    ('silver', 'Silver', 20, 4.5, 0.05, 20000),
 ]
 PARCEL_TRANSIT = 2 * DAY      # จำลอง: ขนส่งแจ้งของถึงหลังส่ง 2 วัน
 PARCEL_RELEASE = 3 * DAY      # ปล่อยเงินอัตโนมัติ 3 วันหลังของถึง
@@ -467,7 +467,7 @@ def user_stats(uid):
     sales, buys = r['sales'], r['buys']
     disp_rate = (r['seller_disputes'] / r['seller_paid']) if r['seller_paid'] else 0.0
     rating = round(rs['a'], 2) if rs['n'] else None
-    level, level_name, limit = 'new', 'ร้านใหม่', NEW_LIMIT
+    level, level_name, limit = 'new', 'Bronze', NEW_LIMIT
     for key, nm, mn, ms, md, lim in LEVELS:
         if sales >= mn and rating is not None and rating >= ms and disp_rate <= md:
             level, level_name, limit = key, nm, lim
@@ -659,7 +659,7 @@ def check_limits(user, role, price):
     lim = s['seller_limit'] if role == 'seller' else s['buyer_limit']
     if price > lim:
         if role == 'seller':
-            raise ApiError(f'วงเงินของ{s["level_name"]}คือ {lim:,} บาท/ดีล — ขายสำเร็จเพิ่มขึ้นเพื่อเลื่อนระดับร้านและปลดล็อกวงเงิน')
+            raise ApiError(f'วงเงินของร้านระดับ {s["level_name"]} คือ {lim:,} บาท/ดีล — ขายสำเร็จเพิ่มขึ้นเพื่อเลื่อนระดับร้านและปลดล็อกวงเงิน')
         raise ApiError(f'ผู้ใช้ใหม่ซื้อได้สูงสุด {lim:,} บาท/ดีล — ทำดีลสำเร็จครบ 5 ดีลเพื่อปลดล็อกวงเงิน')
     if price > ID_REQUIRED_OVER and not user['id_verified']:
         raise ApiError('ดีลที่เกิน 3,000 บาท ต้องยืนยันตัวตนก่อน', 403)

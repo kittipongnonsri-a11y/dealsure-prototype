@@ -130,9 +130,9 @@ function avatar(u, size = '', check = true) {
 }
 const teamAvatar = (size = 'xs') => `<div class="avatar ${size} team" role="img" aria-label="ทีมงานดีลชัวร์"><svg viewBox="0 0 1024 1024"><use href="#logoA"/></svg></div>`;
 function levelBadge(st) {
-  if (st.level === 'gold') return '<span class="badge b-gold">★ ร้านทอง</span>';
-  if (st.level === 'silver') return '<span class="badge b-silver">☆ ร้านเงิน</span>';
-  return '<span class="badge b-silver">ร้านใหม่</span>';
+  if (st.level === 'gold') return '<span class="badge b-gold">★ Gold</span>';
+  if (st.level === 'silver') return '<span class="badge b-silver">☆ Silver</span>';
+  return '<span class="badge b-bronze">Bronze</span>';
 }
 const verBadge = u => u.verified ? `<span class="badge b-green">${ic('shield', 12)}ยืนยันตัวตนแล้ว</span>` : '<span class="badge b-silver">ยังไม่ยืนยันตัวตน</span>';
 const demoTag = u => u.is_demo ? ' <span class="demo">ตัวอย่าง</span>' : '';
@@ -499,7 +499,7 @@ function vCreate() {
     $('#fBuyer').textContent = baht(f.buyer); $('#fSeller').textContent = baht(Math.max(0, f.seller));
     $('#fCancel').innerHTML = p >= MIN_DEAL ? chargeRows(p, F.fee, stay, f).replace(/<div class="r small payout-rule">[\s\S]*?<\/div><\/div>$/, '</div>') : `<p class="small muted">กรอกราคาตั้งแต่ ${MIN_DEAL} บาท เพื่อดูยอดจริง</p>`;
     const st = S.me.stats, lim = F.role === 'seller' ? st.seller_limit : st.buyer_limit; let h = '';
-    if (p > lim) h += noteHtml('err', F.role === 'seller' ? `วงเงินของ${st.level_name}คือ ${fmt(lim)} บาท/ดีล — ขายสำเร็จเพิ่มเพื่อเลื่อนระดับร้านและปลดล็อกวงเงิน` : `ผู้ใช้ใหม่สร้างดีลได้สูงสุด ${fmt(lim)} บาท/ดีล — ทำดีลสำเร็จครบ 5 ดีลเพื่อปลดล็อกวงเงิน`);
+    if (p > lim) h += noteHtml('err', F.role === 'seller' ? `วงเงินของร้านระดับ ${st.level_name} คือ ${fmt(lim)} บาท/ดีล — ขายสำเร็จเพิ่มเพื่อเลื่อนระดับร้านและปลดล็อกวงเงิน` : `ผู้ใช้ใหม่สร้างดีลได้สูงสุด ${fmt(lim)} บาท/ดีล — ทำดีลสำเร็จครบ 5 ดีลเพื่อปลดล็อกวงเงิน`);
     else if (p > 3000 && !S.me.verified) h += noteHtml('warn', `ดีลนี้เกิน 3,000 บาท — ต้อง<b>ยืนยันตัวตน</b>ก่อน (ทดสอบ ใช้เวลาไม่ถึง 1 นาที) <button class="link" onclick="idSheet()">ยืนยันเลย →</button>`);
     else if (p > 3000) h += noteHtml('ok', 'คุณยืนยันตัวตนแล้ว สร้างดีลเกิน 3,000 บาทได้');
     if (p > 0 && p < MIN_DEAL) h += noteHtml('err', `ยอดดีลขั้นต่ำ ${MIN_DEAL} บาท`);
@@ -1331,14 +1331,14 @@ function saveSocials(btn) {
 async function vShop(id) {
   const u = await api('/shops/' + encodeURIComponent(id)); S.shop = u;
   const s = u.stats, mine = S.me && S.me.id === u.id;
-  const lv = l => `<div class="lv${s.level === l ? ' cur' : ''}">${s.level === l && l !== 'new' ? '★ ' : ''}${{new: 'ร้านใหม่', silver: 'ร้านเงิน', gold: 'ร้านทอง'}[l]}</div>`;
+  const lv = l => `<div class="lv${s.level === l ? ' cur' : ''}">${s.level === l && l !== 'new' ? '★ ' : ''}${{new: 'Bronze', silver: 'Silver', gold: 'Gold'}[l]}</div>`;
   $('#view').innerHTML = `<div class="cover"><div class="tools">
       <button class="icon-btn" aria-label="ย้อนกลับ" onclick="goBack()">${ic('back', 20)}</button>
       <button class="icon-btn" aria-label="แชร์ร้าน" onclick="copyText(location.origin+'/s/${u.id}','คัดลอกลิงก์ร้านแล้ว ✓')">${ic('share', 20)}</button></div></div>
     <div class="shophead card" style="margin:-44px 14px 12px">
       <div style="display:flex;gap:12px;align-items:flex-end;margin-top:-40px">
         ${avatar(u, 'xl')}
-        <div style="padding-bottom:2px">${s.level === 'gold' ? '<span class="badge b-gold" style="font-size:12.5px;padding:3px 10px">🏆 ร้านทอง</span>' : levelBadge(s)}</div></div>
+        <div style="padding-bottom:2px">${s.level === 'gold' ? '<span class="badge b-gold" style="font-size:12.5px;padding:3px 10px">🏆 Gold</span>' : levelBadge(s)}</div></div>
       <div style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap"><h2 style="font-size:19px;font-weight:600">${esc(u.shop_name)}</h2>${u.is_demo ? '<span class="demo">ร้านตัวอย่าง</span>' : ''}</div>
       <div class="small muted">${esc(u.shop_bio || 'เจ้าของร้าน: ' + u.name)}</div>
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${u.verified ? `<span class="badge b-green">${ic('shield', 12)}ร้านยืนยันตัวตนแล้ว</span>` : '<span class="badge b-silver">ยังไม่ยืนยันตัวตน</span>'}${s.stays_hosted ? `<span class="badge b-green">🏠 เข้าพักสำเร็จ ${fmt(s.stays_hosted)} ครั้ง</span>` : ''}
@@ -1348,7 +1348,7 @@ async function vShop(id) {
       <div class="levels">${lv('new')}${lv('silver')}${lv('gold')}</div>
       <details class="rules"><summary>ระดับร้านคิดยังไง? · วงเงินตอนนี้ ${fmt(s.seller_limit)} ฿/ดีล</summary>
         <table><tr><th>ระดับ</th><th>ดีลสำเร็จ</th><th>ดาว</th><th>ข้อพิพาท</th><th>วงเงิน/ดีล</th></tr>
-        <tr><td>ร้านใหม่</td><td>–</td><td>–</td><td>–</td><td>5,000 ฿</td></tr>
+        <tr><td>Bronze</td><td>–</td><td>–</td><td>–</td><td>5,000 ฿</td></tr>
         ${u.levels.slice().reverse().map(l => `<tr><td>${l.name}</td><td>${l.min_deals}+</td><td>${l.min_stars}+</td><td>≤${l.max_dispute}%</td><td>${fmt(l.limit)} ฿</td></tr>`).join('')}</table></details>
     </div>
     <div class="wrap" style="padding-top:0">
@@ -1466,7 +1466,7 @@ async function vMe() {
       <p class="small muted mt8">ในแอปจริง: ผูกบัญชีธนาคาร / พร้อมเพย์ เพื่อรับเงิน (ยังไม่เปิดในโหมดทดลอง)</p></div>
     <div class="card"><h3>${ic('shield', 18)}ยืนยันตัวตน</h3>
       ${u.verified ? noteHtml('ok', '<b>ยืนยันตัวตนแล้ว</b> (ทดสอบ – อนุมัติอัตโนมัติ) สร้างดีลเกิน 3,000 บาทได้') : `<p class="small muted">จำเป็นสำหรับดีลที่เกิน 3,000 บาท</p><button class="btn primary sm mt8" onclick="idSheet()">ยืนยันตัวตน (ทดสอบ)</button>`}
-      <p class="small muted mt8">วงเงินต่อดีลตอนนี้: ขาย ${fmt(s.seller_limit)} ฿ (${s.level_name}) · ซื้อ ${fmt(s.buyer_limit)} ฿</p></div>
+      <p class="small muted mt8">วงเงินต่อดีลตอนนี้: ขาย ${fmt(s.seller_limit)} ฿ (ระดับ ${s.level_name}) · ซื้อ ${fmt(s.buyer_limit)} ฿</p></div>
     <div class="card"><h3>${ic('user', 18)}แก้ไขข้อมูล</h3>
       <label class="lb">ชื่อที่ใช้แสดง</label><input class="input" id="meName" maxlength="60" value="${esc(u.name)}">
       <label class="lb">ชื่อร้าน <span class="opt">(ไม่บังคับ)</span></label><input class="input" id="meShop" maxlength="60" value="${u.shop_name !== u.name ? esc(u.shop_name) : ''}" placeholder="เช่น ร้านของสะสมคุณเอ">

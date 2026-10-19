@@ -39,7 +39,7 @@ print('1) เจ้าของที่พักตัวอย่าง (ข�
 sh = [s for s in C().ok('/shops')['shops'] if s['name'] == 'พี่ปุ้ย (ตัวอย่าง)']
 check('มีเจ้าของที่พักตัวอย่าง + ป้ายตัวอย่าง', len(sh) == 1 and sh[0]['is_demo'] and 'ตัวอย่าง' in sh[0]['shop_name'])
 demo = C().ok(f'/shops/{sh[0]["id"]}')
-check('ยืนยันตัวตน + ระดับร้านเงิน + เข้าพักสำเร็จ ≥ 20', demo['verified'] and demo['stats']['level'] == 'silver' and demo['stats']['stays_hosted'] >= 20, demo['stats'])
+check('ยืนยันตัวตน + ระดับ Silver + เข้าพักสำเร็จ ≥ 20', demo['verified'] and demo['stats']['level'] == 'silver' and demo['stats']['stays_hosted'] >= 20, demo['stats'])
 check('ที่พักในหน้าร้าน 2 แห่ง (kind=stay, มีที่อยู่ + แผนที่)', len([p for p in demo['products'] if p['kind'] == 'stay' and p['address'] and p['map_url']]) == 2)
 
 print('2) ตรวจข้อมูลตอนสร้างดีลที่พัก')

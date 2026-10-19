@@ -68,6 +68,7 @@ label.lb:first-child{margin-top:0}
 .b-green{background:var(--green-l);color:var(--green-d)}
 .b-blue{background:var(--blue-l);color:var(--blue)}
 .b-gold{background:linear-gradient(135deg,#FFE9A8,#F3C55A);color:#6B4A07;border:1px solid #E0B04A}
+.b-bronze{background:linear-gradient(135deg,#E8C9A0,#C9956B);color:#4A2A12;border:1px solid #B87333}
 .b-gray{background:#EEF1F5;color:#56657C}
 .demo{display:inline-block;font-size:10px;background:#FFF1C2;color:#7A5A00;border-radius:6px;padding:0 6px;font-weight:600;vertical-align:middle;font-family:'Sarabun'}
 
@@ -243,6 +244,7 @@ label.lb{color:#3F5A55}
 .badge{border-radius:999px;padding:3px 10px}
 .b-green,.b-blue{background:var(--tq-l);color:var(--tq-t)}
 .b-gold{background:#FFF0CC;border:none;color:#8A5A00}
+.b-bronze{background:#F3E0C8;border:none;color:#5C3310}
 .demo{background:#FFF0CC;border-radius:999px;color:#7A5200}
 .stars{color:#F5A623}
 /* seller / stats */
@@ -367,6 +369,7 @@ a{color:var(--tq-t)}
 .avatar.sm{width:46px;height:46px;font-size:18px}
 .avatar.sm .v{width:18px;height:18px;right:-3px;bottom:-3px}
 .b-silver{background:#E7F3EF;color:#3F5A55}
+.b-bronze{background:#F3E0C8;color:#5C3310}
 
 /* photos */
 .ph img{width:100%;height:100%;object-fit:cover;display:block}

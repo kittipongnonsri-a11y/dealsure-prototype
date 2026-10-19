@@ -169,16 +169,16 @@ check('ยืนยันตัวตนอัตโนมัติ (ทดส�
 code4k = new_deal(A, title='แพง 4,000', price=4000)
 check('สร้างดีล 4,000 ได้หลังยืนยัน', bool(code4k))
 s, e = A.req('/deals', dict(role='seller', title='แพงมาก', price=6000, delivery='parcel', due_date=time.strftime('%Y-%m-%d'), fee_payer='half'))
-check('ร้านใหม่เกิน 5,000 ไม่ได้', s == 400 and '5,000' in e['error'])
+check('Bronze เกิน 5,000 ไม่ได้', s == 400 and '5,000' in e['error'])
 s, e = B.req(f'/deals/{code4k}/accept', {})
 check('ผู้ซื้อที่ยังไม่ยืนยันตัวตน รับดีล 4,000 ไม่ได้', s == 403)
 check('ขั้นต่ำ 20 บาท: ราคา 100 ค่าธรรมเนียม 20', deal(B, new_deal(A, title='ถูก', price=100))['fee'] == 20)
 
-print('8) ซื้อจากหน้าร้านตัวอย่าง (ร้านทอง)')
+print('8) ซื้อจากหน้าร้านตัวอย่าง (Gold)')
 shops = B.ok('/shops')['shops']
 gold = [s for s in shops if s['stats']['level'] == 'gold'][0]
 shop = B.ok(f'/shops/{gold["id"]}')
-check('หน้าร้านตัวอย่างเป็นร้านทอง + มีสินค้า', shop['stats']['level'] == 'gold' and shop['verified'] and len(shop['products']) >= 4)
+check('หน้าร้านตัวอย่างเป็น Gold + มีสินค้า', shop['stats']['level'] == 'gold' and shop['verified'] and len(shop['products']) >= 4)
 watch = [p for p in shop['products'] if p['price'] == 3200][0]
 lens = [p for p in shop['products'] if p['price'] == 6500][0]
 s, e = B.req(f'/products/{watch["id"]}/buy', {'delivery': 'parcel'})

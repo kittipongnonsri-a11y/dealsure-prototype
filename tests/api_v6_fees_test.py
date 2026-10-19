@@ -52,7 +52,7 @@ s, e = S.req('/products', dict(stay_body(price='80'), kind='stay'))
 check('ลงที่พักราคาต่อคืน 80 ไม่ได้', s == 400 and 'ขั้นต่ำ 100 บาท' in e['error'])
 pid = S.ok('/products', {'title': 'ของ 100 บาท', 'price': '100', 'deliveries': ['parcel']})['id']
 # สินค้าเก่าที่ลงไว้ก่อนกฎใหม่ (ราคา 80) → สั่งซื้อไม่ได้
-db = sqlite3.connect(os.path.join(HERE, '..', 'data', 'dealsure.db'))
+db = sqlite3.connect(os.path.join(os.environ.get('DEALSURE_DATA', os.path.join(HERE, '..', 'data')), 'dealsure.db'))
 db.execute('UPDATE products SET price=80 WHERE id=?', (pid,)); db.commit(); db.close()
 s, e = B.req(f'/products/{pid}/buy', {'delivery': 'parcel'})
 check('สั่งซื้อสินค้าหน้าร้านที่ต่ำกว่า 100 ไม่ได้ + ข้อความชัดเจน', s == 400 and 'ขั้นต่ำ 100 บาท' in e['error'], e)

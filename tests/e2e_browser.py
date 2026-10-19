@@ -170,7 +170,7 @@ with sync_playwright() as p:
     B.evaluate('window.scrollTo(0,0)'); shot(B, '24-late-delivery-refund-button')
     B.click('text=ขอเงินคืน (ส่งช้าเกินกำหนด)'); wait_text(B, 'คืนเงินให้ผู้ซื้อแล้ว')
 
-    print('10) หน้าร้านตัวอย่าง (ร้านทอง) → ซื้อแบบปลอดภัย')
+    print('10) หน้าร้านตัวอย่าง (Gold) → ซื้อแบบปลอดภัย')
     B.goto(BASE + '/#/'); wait_text(B, 'ร้านแนะนำ'); shot(B, '25-buyer-home-deals', full=True)
     B.click('.shoprow >> nth=0'); wait_text(B, 'คะแนนความน่าเชื่อถือ'); shot(B, '26-shop-gold', full=True)
     B.click('.pcard:has-text("แผ่นเสียง") >> text=ซื้อแบบปลอดภัย'); B.click('#buyChips [data-v=messenger]'); shot(B, '27-shop-buy-sheet')
@@ -183,7 +183,7 @@ with sync_playwright() as p:
     S.click('#limitNotes >> text=ยืนยันเลย'); upload(S, '#idBox', os.path.join(HERE, 'fake-id.jpg')); S.wait_for_selector('#idBox img')
     shot(S, '30-id-verify-test')
     S.click('text=ส่งยืนยันตัวตน (ทดสอบ)'); wait_text(S, 'คุณยืนยันตัวตนแล้ว')
-    S.fill('#price', '6000'); wait_text(S, 'วงเงินของร้านใหม่'); S.locator('#limitNotes').scroll_into_view_if_needed(); shot(S, '31-new-user-limit-5000')
+    S.fill('#price', '6000'); wait_text(S, 'วงเงินของร้านระดับ Bronze'); S.locator('#limitNotes').scroll_into_view_if_needed(); shot(S, '31-new-user-limit-5000')
 
     print('12) โปรไฟล์ / บัญชี / ร้านของฉัน')
     B.goto(BASE + '/#/me'); wait_text(B, 'บัญชีของฉัน')
