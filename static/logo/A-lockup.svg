@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 440" width="1080" height="440">
+<style>@import url("https://fonts.googleapis.com/css2?family=Kanit:wght@500;700&amp;display=swap");</style>
+<g transform="translate(40 40) scale(.3515625)"><defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0B766E"/><stop offset=".5" stop-color="#0F8F86"/><stop offset="1" stop-color="#14B8A6"/></linearGradient>
+<radialGradient id="glow" cx=".78" cy=".22" r=".7"><stop offset="0" stop-color="#5EEAD4" stop-opacity=".45"/><stop offset="1" stop-color="#5EEAD4" stop-opacity="0"/></radialGradient>
+</defs>
+<rect width="1024" height="1024" rx="232" fill="url(#bg)"/>
+<rect width="1024" height="1024" rx="232" fill="url(#glow)"/><path d="M512 196 L760 286 Q776 292 776 309 L776 486 Q776 700 512 828 Q248 700 248 486 L248 309 Q248 292 264 286 Z" fill="#FFFFFF" transform="translate(512 470) scale(.82) translate(-512 -512)"/>
+<path d="M410 470 L485 545 L625 400" fill="none" stroke="#0B766E" stroke-width="66" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M214 560 Q214 790 470 862" fill="none" stroke="#E6FAF7" stroke-width="74" stroke-linecap="round"/>
+<path d="M810 560 Q810 790 554 862" fill="none" stroke="#FCD77E" stroke-width="74" stroke-linecap="round"/>
+<circle cx="214" cy="548" r="44" fill="#E6FAF7"/><circle cx="810" cy="548" r="44" fill="#FCD77E"/></g>
+<text x="460" y="250" font-family="Kanit, Prompt, sans-serif" font-weight="700" font-size="188" fill="#123C38">ดีล<tspan fill="#0B766E">ชัวร์</tspan></text>
+<text x="466" y="346" font-family="Kanit, Prompt, sans-serif" font-weight="500" font-size="62" letter-spacing="6" fill="#5F7671">DealSure</text>
+</svg>

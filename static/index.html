@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0B766E">
+<title>ดีลชัวร์ (DealSure) – ซื้อขายผ่านตัวกลาง ปลอดภัย (โหมดทดลอง)</title>
+<link rel="icon" type="image/png" href="/static/logo/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/logo/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css?v=1">
+</head>
+<body>
+<div class="app" id="app">
+<!--SPRITE-->
+  <div class="testbar">โหมดทดลอง – ไม่มีเงินจริง · ข้อมูลทั้งหมดเป็นตัวอย่าง</div>
+  <div id="view"><div class="loading">กำลังโหลด…</div></div>
+  <div class="notif" id="notif"></div>
+  <nav class="tabbar hidden" id="tabbar">
+    <a class="tab" data-t="home" href="#/"><svg><use href="#home"/></svg>ดีลของฉัน</a>
+    <a class="tab" data-t="create" href="#/create"><svg><use href="#plus"/></svg>สร้างดีล</a>
+    <a class="tab" data-t="shop" href="#/myshop"><svg><use href="#store"/></svg>ร้านของฉัน</a>
+    <a class="tab" data-t="me" href="#/me"><svg><use href="#user"/></svg>บัญชี<span class="tdot hidden" id="tdot"></span></a>
+  </nav>
+  <div class="sheet-bg" id="sheet" onclick="if(event.target===this)closeSheet()"><div class="sheet" id="sheetBody"></div></div>
+  <input type="file" id="filePick">
+  <div class="toast" id="toast"></div>
+</div>
+<script src="/static/app.js?v=1"></script>
+</body>
+</html>

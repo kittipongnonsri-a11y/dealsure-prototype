@@ -1,0 +1,1 @@
+# ไม่มีไลบรารีเสริม – ใช้ Python 3 standard library ล้วน
