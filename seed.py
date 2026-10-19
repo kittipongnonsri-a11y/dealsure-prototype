@@ -79,3 +79,53 @@ def run(db):
         img, t, p = rnd.choice(sil_items)
         deal(silver, 190 - i * 7, img, t, p, [72, 20, 8], on_time=0 if i % 9 == 3 else 1)
     deal(silver, 60, 'shirt', 'เสื้อเชิ้ตวินเทจ (ตัวอย่าง)', 350, None, status='refunded', disputed=True)
+    run_stay(db)
+
+
+STAY_REVIEWS5 = ['ที่พักตรงปกมาก วิวดอยสวยกว่าในรูป เจ้าของใจดี', 'จองผ่านดีลชัวร์ สบายใจ เช็คอินแล้วค่อยปล่อยเงิน', 'ห้องสะอาด เงียบสงบ เหมาะกับพักผ่อน',
+                 'เจ้าของวิดีโอคอลโชว์ห้องก่อนจอง ตรงตามจริงทุกอย่าง', 'อาหารเช้าอร่อย จะกลับมาอีกแน่นอน', '']
+STAY_REVIEWS4 = ['ห้องดี แต่ทางขึ้นชันนิดนึง ขับรถระวังหน่อย', 'โอเคค่ะ ตามรูป น้ำอุ่นมาช้านิดหน่อย']
+
+
+def run_stay(db):
+    """เจ้าของที่พักตัวอย่าง (ปลอม) + ที่พักในหน้าร้าน + ประวัติการเข้าพักที่สำเร็จ (ให้เห็นระดับ/สถิติ)"""
+    rnd = random.Random(7)
+    now = time.time()
+    ex = lambda sql, a=(): db.execute(sql, a).lastrowid
+    host = ex('INSERT INTO users(name,phone,created_at,id_verified,id_verified_at,shop_name,shop_bio,is_demo) VALUES(?,?,?,?,?,?,?,1)',
+              ('พี่ปุ้ย (ตัวอย่าง)', '0800000003', now - 540 * DAY, 1, now - 530 * DAY, 'บ้านพักริมดอย แม่ริม (ตัวอย่าง)',
+               'โฮมสเตย์ริมดอย · แม่ริม เชียงใหม่ · เจ้าของดูแลเอง (ข้อมูลตัวอย่าง)'))
+    guests = [r[0] for r in db.execute("SELECT id FROM users WHERE is_demo=1 AND shop_name IS NULL ORDER BY id LIMIT 12").fetchall()]
+    if not guests:
+        guests = [ex('INSERT INTO users(name,phone,created_at,is_demo) VALUES(?,?,?,1)', (f'แขกทดสอบ {i + 1:02d}', f'08991000{i + 1:02d}', now - 200 * DAY))
+                  for i in range(6)]
+    P = lambda x: json.dumps(['/static/demo/' + x + '.svg'])
+    MAP = 'https://www.google.com/maps/search/?api=1&query=18.9167,98.9333'
+    stays = [('บ้านไม้ริมดอย ห้องวิวภูเขา (ตัวอย่าง)', 'ห้องนอนใหญ่ 1 ห้อง · ระเบียงวิวดอย · อาหารเช้า · ที่จอดรถ', 1290, 'house', 4),
+             ('กระท่อมกลางสวน สำหรับ 2 คน (ตัวอย่าง)', 'เตียงคิงไซซ์ · อ่างอาบน้ำกลางแจ้ง · เงียบสงบ', 1890, 'cabin', 2)]
+    for t, desc, price, img, mg in stays:
+        ex("""INSERT INTO products(user_id,title,description,price,photos,deliveries,fee_payer,ship_days,created_at,kind,address,map_url,
+              checkin_time,max_guests,free_cancel_days,host_contact) VALUES(?,?,?,?,?,'["stay"]','half',0,?,'stay',?,?,'14:00',?,3,?)""",
+           (host, t, desc, price, P(img), now - 120 * DAY, '99 หมู่ 5 ต.ริมเหนือ อ.แม่ริม จ.เชียงใหม่ (ที่อยู่ตัวอย่าง)', MAP, mg, 'พี่ปุ้ย (ตัวอย่าง)'))
+    for i in range(34):
+        t, desc, ppn, img, mg = stays[i % 2]
+        nights = rnd.choice([1, 2, 2, 3]); price = ppn * nights
+        g = rnd.choice(guests)
+        t0 = now - (500 - i * 14) * DAY
+        cin = t0 + 10 * DAY
+        fee = round(max(20, price * 0.02), 2); bf = round(fee / 2, 2); sf = round(fee - bf, 2)
+        due = time.strftime('%Y-%m-%d', time.localtime(cin))
+        did = ex("""INSERT INTO deals(code,creator_id,creator_role,seller_id,buyer_id,source,title,description,price,photos,delivery,due_date,fee_payer,fee,
+                buyer_fee,seller_fee,buyer_pay,seller_get,status,created_at,accepted_at,paid_at,completed_at,release_reason,payout_amount,is_demo,
+                kind,address,map_url,checkin_at,checkout_date,nights,guests,host_contact,free_cancel_days,auto_release_at)
+                VALUES(?,?,'buyer',?,?,'shop',?,?,?,?,'stay',?,'half',?,?,?,?,?,'completed',?,?,?,?,?,?,1,'stay',?,?,?,?,?,?,?,3,?)""",
+                 (f'DS-STAY-{i + 1:04d}', g, host, g, t, desc, price, P(img), due, fee, bf, sf, price + bf, price - sf,
+                  t0, t0, t0 + 600, cin + 1800, 'guest_checkin' if i % 5 else 'checkin_code', price - sf,
+                  '99 หมู่ 5 ต.ริมเหนือ อ.แม่ริม จ.เชียงใหม่ (ที่อยู่ตัวอย่าง)', MAP, cin,
+                  time.strftime('%Y-%m-%d', time.localtime(cin + nights * DAY)), nights, rnd.randint(1, mg), 'พี่ปุ้ย (ตัวอย่าง)', cin + DAY))
+        if rnd.random() < 0.9:
+            s = rnd.choices([5, 4], weights=[88, 12])[0]
+            ex('INSERT INTO reviews(deal_id,from_id,to_id,target_role,stars,text,created_at) VALUES(?,?,?,?,?,?,?)',
+               (did, g, host, 'seller', s, rnd.choice(STAY_REVIEWS5 if s == 5 else STAY_REVIEWS4), cin + 2 * DAY))
+        ex('INSERT INTO payouts(user_id,deal_id,amount,status,created_at,paid_at) VALUES(?,?,?,?,?,?)',
+           (host, did, price - sf, 'paid', cin + 1800, cin + 0.4 * DAY))

@@ -2,11 +2,12 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const baht = n => { const v = Math.round((+n || 0) * 100) / 100; return v.toLocaleString('en-US', {minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2}) + ' ฿'; };
-const DL = {parcel: 'ส่งพัสดุ', meet: 'นัดรับ', messenger: 'แมสเซนเจอร์'};
+const DL = {parcel: 'ส่งพัสดุ', meet: 'นัดรับ', messenger: 'แมสเซนเจอร์', stay: '🏠 ดีลที่พัก'};
 const dFull = ts => ts ? new Intl.DateTimeFormat('th-TH', {day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', timeZone:'Asia/Bangkok'}).format(new Date(ts * 1000)) : '-';
 const ST = {open:'รอรับดีล', accepted:'รอจ่าย', held:'พักเงิน', shipped:'กำลังส่ง', delivered:'ของถึงแล้ว', disputed:'ข้อพิพาท', completed:'สำเร็จ', refunded:'คืนเงิน', partial:'คืนบางส่วน', cancelled:'ยกเลิก'};
 const ic = (id, n = 16) => `<svg width="${n}" height="${n}"><use href="#${id}"/></svg>`;
 const ROLE = {seller: 'ผู้ขาย', buyer: 'ผู้ซื้อ', admin: 'ทีมงาน'};
+const ROLE_STAY = {seller: 'เจ้าของที่พัก', buyer: 'ผู้เข้าพัก', admin: 'ทีมงาน'};
 const TH = {}, PEND = {}, DRAFT = {};
 const tm = ts => new Intl.DateTimeFormat('th-TH', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok'}).format(new Date(ts * 1000));
 function av(u) {
@@ -18,7 +19,7 @@ function msgHtml(m, t, adminView) {
   const name = m.is_admin ? 'ทีมงานดีลชัวร์' : (m.role === 'seller' ? u.shop_name : u.name);
   const mine = adminView && m.is_admin;
   return `<div class="msg${mine ? ' me' : ''}${m.is_admin ? ' team' : ''}">${mine ? '' : `<div class="mav">${av(u)}</div>`}<div class="bw">
-    <div class="who">${esc(name)} ${m.is_admin ? `<span class="badge b-team">${ic('shield', 11)}ทีมงาน</span>` : `<span class="rtag">${ROLE[m.role] || ''}</span>`}</div>
+    <div class="who">${esc(name)} ${m.is_admin ? `<span class="badge b-team">${ic('shield', 11)}ทีมงาน</span>` : `<span class="rtag">${((t.deal && t.deal.kind === 'stay') ? ROLE_STAY : ROLE)[m.role] || ''}</span>`}</div>
     <div class="bub">${m.photos.length ? `<div class="mph n${Math.min(m.photos.length, 2)}">${m.photos.map(p => `<a href="${esc(p)}" target="_blank"><img src="${esc(p)}" alt="รูป"></a>`).join('')}</div>` : ''}${m.text ? `<div class="tx">${esc(m.text)}</div>` : ''}</div>
     ${m.warn ? `<div class="mwarn">${ic('warn', 13)}มีการพูดถึงการโอนเงิน/เลขบัญชี</div>` : ''}<div class="mt">${tm(m.created_at)}</div></div></div>`;
 }
@@ -81,30 +82,34 @@ async function load() {
     <div class="card"><h3><svg width="18" height="18" style="color:var(--red)!important"><use href="#warn"/></svg>ข้อพิพาทรอตัดสิน</h3>
       ${r.disputes.length ? r.disputes.map(d => `<div class="card" style="box-shadow:none;border:1.5px solid #F6C6C6" id="dp-${d.code}">
         <div class="row2"><b class="prompt grow">#${esc(d.code)} · ${esc(d.title)}</b><span class="spill sp-red">${esc(d.dispute_reason)}</span></div>
-        <div class="small muted">ผู้ขาย: ${esc(d.seller_name)} · ผู้ซื้อ: ${esc(d.buyer_name)} · ${DL[d.delivery] || d.delivery} · แจ้งเมื่อ ${dFull(d.disputed_at)}</div>
-        <div class="small">ผู้ซื้อจ่าย <b>${baht(d.buyer_pay)}</b> · ผู้ขายจะได้ (ถ้าปล่อยเงิน) <b>${baht(d.seller_get)}</b> · เลขพัสดุ ${esc(d.tracking || '-')}</div>
+        ${d.kind === 'stay' ? `<div class="small muted">เจ้าของที่พัก: ${esc(d.seller_name)} · ผู้เข้าพัก: ${esc(d.buyer_name)} · 🏠 ดีลที่พัก · แจ้งเมื่อ ${dFull(d.disputed_at)}</div>
+        <div class="small">ผู้เข้าพักจ่าย <b>${baht(d.buyer_pay)}</b> · เจ้าของจะได้ (ถ้าปล่อยเงิน) <b>${baht(d.seller_get)}</b> · เช็คอิน <b>${dFull(d.checkin_at)}</b> · ${d.nights} คืน ${d.guests} คน</div>
+        <div class="addr"><div><b>ที่อยู่ตามประกาศ:</b> ${esc(d.address || '-')} · ผู้ติดต่อ ${esc(d.host_contact || '-')}<br>${d.map_url ? `<a class="link" href="${esc(d.map_url)}" target="_blank" rel="noopener">📍 เปิด Google Maps ↗</a>` : ''}</div></div>
+        ${d.dispute_location ? `<div class="proof">📍 ผู้เข้าพักอยู่ที่: ${esc(d.dispute_location)}</div>` : ''}`
+        : `<div class="small muted">ผู้ขาย: ${esc(d.seller_name)} · ผู้ซื้อ: ${esc(d.buyer_name)} · ${DL[d.delivery] || d.delivery} · แจ้งเมื่อ ${dFull(d.disputed_at)}</div>
+        <div class="small">ผู้ซื้อจ่าย <b>${baht(d.buyer_pay)}</b> · ผู้ขายจะได้ (ถ้าปล่อยเงิน) <b>${baht(d.seller_get)}</b> · เลขพัสดุ ${esc(d.tracking || '-')}</div>`}
         ${d.dispute_detail ? `<div class="proof">${esc(d.dispute_detail)}</div>` : ''}
         <div class="gallery">${files(d.dispute_files)}</div>
         <div class="admin-thread" id="athread-${d.thread.id}">
-          <h4>${ic('chat', 18)}ข้อความถึงผู้ซื้อและผู้ขาย ${d.thread.unread ? `<span class="unread-pill" id="aunread-${d.thread.id}">ใหม่ ${d.thread.unread}</span>` : ''}<span class="small muted" style="font-weight:400;margin-left:auto">ทั้งสองฝ่ายเห็นข้อความนี้ในหน้าดีล + ได้แจ้งเตือน</span></h4>
+          <h4>${ic('chat', 18)}ข้อความถึง${d.kind === 'stay' ? 'ผู้เข้าพักและเจ้าของที่พัก' : 'ผู้ซื้อและผู้ขาย'} ${d.thread.unread ? `<span class="unread-pill" id="aunread-${d.thread.id}">ใหม่ ${d.thread.unread}</span>` : ''}<span class="small muted" style="font-weight:400;margin-left:auto">ทั้งสองฝ่ายเห็นข้อความนี้ในหน้าดีล + ได้แจ้งเตือน</span></h4>
           <div class="msgs" id="amsgs-${d.thread.id}">${threadMsgs(d.thread, d.thread.messages)}</div>
           <div class="composer">
             <div class="photos cpend hidden" id="apend-${d.thread.id}"></div>
             <div class="crow"><button class="cbtn" aria-label="แนบรูป" onclick="addPhoto(${d.thread.id})">${ic('camera', 22)}</button>
               <textarea class="input cin" id="amsg-${d.thread.id}" rows="1" maxlength="1000" placeholder="พิมพ์ในนามทีมงาน…" oninput="DRAFT[${d.thread.id}]=this.value">${esc(DRAFT[d.thread.id] || '')}</textarea>
               <button class="csend" id="asend-${d.thread.id}" aria-label="ส่ง" onclick="sendMsg(${d.thread.id})">${ic('send', 20)}</button></div></div>
-          ${d.deal_chat.length ? `<details class="dchat"><summary>ดูแชทระหว่างผู้ซื้อ–ผู้ขาย (${d.deal_chat.length} ข้อความ · ใช้เป็นหลักฐาน)</summary><div class="msgs">${threadMsgs(d.thread, d.deal_chat, false)}</div></details>` : '<div class="small muted mt8">ผู้ซื้อ–ผู้ขายยังไม่เคยแชทกันในดีลนี้</div>'}
+          ${d.deal_chat.length ? `<details class="dchat"><summary>ดูแชทระหว่าง${d.kind === 'stay' ? 'ผู้เข้าพัก–เจ้าของที่พัก' : 'ผู้ซื้อ–ผู้ขาย'} (${d.deal_chat.length} ข้อความ · ใช้เป็นหลักฐาน)</summary><div class="msgs">${threadMsgs(d.thread, d.deal_chat, false)}</div></details>` : `<div class="small muted mt8">${d.kind === 'stay' ? 'ผู้เข้าพัก–เจ้าของที่พัก' : 'ผู้ซื้อ–ผู้ขาย'}ยังไม่เคยแชทกันในดีลนี้</div>`}
         </div>
         <label class="lb">บันทึกถึงทั้งสองฝ่าย (ไม่บังคับ)</label><input class="input" id="note-${d.code}" maxlength="300" placeholder="เช่น ตรวจคลิปแล้ว ของเสียหายจริง">
-        <div class="twobtn mt12"><button class="btn primary sm" onclick="resolve('${d.code}','refund')">คืนเงินผู้ซื้อทั้งหมด</button><button class="btn ghost sm" onclick="resolve('${d.code}','release')">ปล่อยเงินให้ผู้ขาย</button></div>
-        <div class="codein mt8"><input class="input" id="amt-${d.code}" inputmode="decimal" placeholder="คืนผู้ซื้อ (บาท)" style="max-width:none;flex:1"><button class="btn ghost sm" style="flex:1" onclick="resolve('${d.code}','partial')">คืนบางส่วน</button></div>
+        <div class="twobtn mt12"><button class="btn primary sm" onclick="resolve('${d.code}','refund')">คืนเงิน${d.kind === 'stay' ? 'ผู้เข้าพัก' : 'ผู้ซื้อ'}ทั้งหมด</button><button class="btn ghost sm" onclick="resolve('${d.code}','release')">ปล่อยเงินให้${d.kind === 'stay' ? 'เจ้าของที่พัก' : 'ผู้ขาย'}</button></div>
+        <div class="codein mt8"><input class="input" id="amt-${d.code}" inputmode="decimal" placeholder="คืน${d.kind === 'stay' ? 'ผู้เข้าพัก' : 'ผู้ซื้อ'} (บาท)" style="max-width:none;flex:1"><button class="btn ghost sm" style="flex:1" onclick="resolve('${d.code}','partial')">คืนบางส่วน</button></div>
       </div>`).join('') : '<div class="empty-st">ไม่มีข้อพิพาทค้างอยู่ 🎉</div>'}</div>
     <div class="card"><h3><svg width="18" height="18"><use href="#wallet"/></svg>รอโอนรอบถัดไป (วันละครั้ง 18:00 น.)</h3>
       ${r.payouts.length ? `<table class="atable"><tr><th>ผู้ขาย</th><th>ดีล</th><th>ยอด</th></tr>${r.payouts.map(p => `<tr><td>${esc(p.name)}</td><td>#${esc(p.code)}</td><td>${baht(p.amount)}</td></tr>`).join('')}</table>
         <button class="btn primary sm mt12" onclick="runPayout()">จำลองรอบโอนวันนี้ (โอนทั้งหมด)</button>` : '<div class="empty-st">ไม่มียอดรอโอน</div>'}</div>
     <div class="card"><h3><svg width="18" height="18"><use href="#list"/></svg>ดีลล่าสุด (ไม่รวมข้อมูลตัวอย่าง)</h3>
       <div style="overflow-x:auto"><table class="atable"><tr><th>รหัส</th><th>สินค้า</th><th>ผู้ขาย → ผู้ซื้อ</th><th>ยอด</th><th>สถานะ</th><th>สร้างเมื่อ</th></tr>
-      ${r.recent.map(d => `<tr><td>${esc(d.code)}</td><td>${esc(d.title)}</td><td>${esc(d.seller_name)} → ${esc(d.buyer_name)}</td><td>${baht(d.buyer_pay)}</td><td>${ST[d.status] || d.status}</td><td>${dFull(d.created_at)}</td></tr>`).join('')}</table></div></div>
+      ${r.recent.map(d => `<tr><td>${esc(d.code)}</td><td>${d.kind === 'stay' ? '🏠 ' : ''}${esc(d.title)}</td><td>${esc(d.seller_name)} → ${esc(d.buyer_name)}</td><td>${baht(d.buyer_pay)}</td><td>${ST[d.status] || d.status}</td><td>${dFull(d.created_at)}</td></tr>`).join('')}</table></div></div>
     <div class="card"><h3><svg width="18" height="18"><use href="#shield"/></svg>ยืนยันตัวตน (ทดสอบ – อนุมัติอัตโนมัติ)</h3>
       ${r.ids.length ? `<table class="atable"><tr><th>ชื่อ</th><th>เบอร์</th><th>รูปที่ส่ง</th><th>เมื่อ</th></tr>${r.ids.map(u => `<tr><td>${esc(u.name)}</td><td>${esc(u.phone)}</td><td>${u.id_doc ? `<a href="${esc(u.id_doc)}" target="_blank">ดูรูป</a>` : '-'}</td><td>${dFull(u.id_verified_at)}</td></tr>`).join('')}</table>` : '<div class="empty-st">ยังไม่มี</div>'}</div>
     <button class="btn ghost sm" onclick="load()">รีเฟรช</button>`;

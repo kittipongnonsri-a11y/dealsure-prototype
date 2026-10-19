@@ -44,6 +44,11 @@ FEE_PAYERS = ('buyer', 'seller', 'half')
 CARRIERS = ('Kerry Express', 'Flash Express', 'ไปรษณีย์ไทย (EMS)', 'J&T Express', 'อื่น ๆ')
 DISPUTE_REASONS = ('ของไม่ตรงปก', 'ของเสียหาย', 'ไม่ได้รับของ', 'ได้ไม่ครบ', 'อื่น ๆ')
 ACTIVE = ('open', 'accepted', 'held', 'shipped', 'delivered', 'disputed')
+# ---- ดีลที่พัก (accommodation) ----
+STAY_RELEASE = 1 * DAY        # ปล่อยเงินอัตโนมัติ 24 ชม. หลังเวลาเช็คอิน (ถ้าผู้เข้าพักไม่ยืนยัน/ไม่แจ้งปัญหา)
+STAY_REASONS = ('ไม่มีที่พักจริง', 'ที่พักไม่ตรงปก', 'เข้าพักไม่ได้', 'อื่น ๆ')
+LATE_CANCEL_REASON = 'ขอยกเลิกหลังหมดเวลายกเลิกฟรี'
+MAP_RX = re.compile(r'^https?://([\w-]+\.)*(google\.[a-z.]+/maps|maps\.google\.[a-z.]+|maps\.app\.goo\.gl|goo\.gl/maps)', re.I)
 
 os.makedirs(UPLOADS, exist_ok=True)
 LOCK = threading.RLock()
@@ -105,7 +110,15 @@ db.executescript(SCHEMA)
 
 def _migrate():
     """เพิ่มคอลัมน์ใหม่ให้ฐานข้อมูลเดิม (ไม่ลบข้อมูล)"""
-    for table, col, typ in (('users', 'avatar', 'TEXT'), ('notifications', 'link', 'TEXT')):
+    cols = (('users', 'avatar', 'TEXT'), ('notifications', 'link', 'TEXT'),
+            ('deals', 'kind', "TEXT DEFAULT 'goods'"), ('deals', 'address', 'TEXT'), ('deals', 'map_url', 'TEXT'),
+            ('deals', 'checkin_at', 'REAL'), ('deals', 'checkout_date', 'TEXT'), ('deals', 'nights', 'INTEGER'),
+            ('deals', 'guests', 'INTEGER'), ('deals', 'host_contact', 'TEXT'), ('deals', 'free_cancel_days', 'INTEGER'),
+            ('deals', 'dispute_location', 'TEXT'),
+            ('products', 'kind', "TEXT DEFAULT 'goods'"), ('products', 'address', 'TEXT'), ('products', 'map_url', 'TEXT'),
+            ('products', 'checkin_time', 'TEXT'), ('products', 'max_guests', 'INTEGER'), ('products', 'free_cancel_days', 'INTEGER'),
+            ('products', 'host_contact', 'TEXT'))
+    for table, col, typ in cols:
         if col not in [r[1] for r in db.execute(f'PRAGMA table_info({table})')]:
             db.execute(f'ALTER TABLE {table} ADD COLUMN {col} {typ}')
     db.commit()
@@ -146,6 +159,64 @@ def due_ts(due_date):
 
 def today_str(ts=None):
     return datetime.fromtimestamp(ts or now(), TZ).strftime('%Y-%m-%d')
+
+
+def is_stay(d): return (d['kind'] or 'goods') == 'stay'
+
+
+def day_start(ts):
+    dt = datetime.fromtimestamp(ts, TZ)
+    return datetime(dt.year, dt.month, dt.day, tzinfo=TZ).timestamp()
+
+
+def parse_date(v, msg):
+    v = s_(v, 10)
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', v): raise ApiError(msg)
+    try: datetime.strptime(v, '%Y-%m-%d')
+    except ValueError: raise ApiError(msg)
+    return v
+
+
+def checkin_ts(date, hm):
+    y, m, d = map(int, date.split('-')); hh, mm = map(int, hm.split(':'))
+    return datetime(y, m, d, hh, mm, tzinfo=TZ).timestamp()
+
+
+def stay_common(b):
+    """ข้อมูลที่พักที่ใช้ร่วมกันทั้งดีลและสินค้าในร้าน"""
+    title = s_(b.get('title'), 120)
+    if not title: raise ApiError('กรุณากรอกชื่อที่พัก')
+    address = s_(b.get('address'), 300)
+    if not address: raise ApiError('กรุณากรอกที่อยู่ที่พัก')
+    map_url = s_(b.get('map_url'), 500)
+    if not MAP_RX.match(map_url): raise ApiError('กรุณาใส่ลิงก์ Google Maps ของที่พัก (เช่น https://maps.app.goo.gl/…)')
+    host = s_(b.get('host_contact'), 60)
+    if not host: raise ApiError('กรุณากรอกชื่อผู้ติดต่อของที่พัก')
+    try: fcd = int(b.get('free_cancel_days') if b.get('free_cancel_days') not in (None, '') else 3)
+    except Exception: raise ApiError('จำนวนวันยกเลิกฟรีไม่ถูกต้อง')
+    if not 0 <= fcd <= 30: raise ApiError('ยกเลิกฟรีได้ 0–30 วันก่อนเช็คอิน')
+    return dict(title=title, address=address, map_url=map_url, host_contact=host, free_cancel_days=fcd)
+
+
+def stay_dates(b, max_guests=30):
+    cin = parse_date(b.get('checkin_date'), 'กรุณาเลือกวันเช็คอิน')
+    hm = s_(b.get('checkin_time'), 5) or '14:00'
+    if not re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d', hm): raise ApiError('เวลาเช็คอินไม่ถูกต้อง (เช่น 14:00)')
+    if b.get('nights') not in (None, '') and not b.get('checkout_date'):
+        try: n = int(b.get('nights'))
+        except Exception: raise ApiError('จำนวนคืนไม่ถูกต้อง')
+        cout = (datetime.strptime(cin, '%Y-%m-%d') + timedelta(days=n)).strftime('%Y-%m-%d')
+    else:
+        cout = parse_date(b.get('checkout_date'), 'กรุณาเลือกวันเช็คเอาต์')
+    nights = (datetime.strptime(cout, '%Y-%m-%d') - datetime.strptime(cin, '%Y-%m-%d')).days
+    if nights < 1: raise ApiError('วันเช็คเอาต์ต้องหลังวันเช็คอินอย่างน้อย 1 คืน')
+    if nights > 60: raise ApiError('จองได้สูงสุด 60 คืนต่อดีล')
+    ts = checkin_ts(cin, hm)
+    if ts <= now(): raise ApiError('เวลาเช็คอินต้องเป็นเวลาในอนาคต')
+    try: guests = int(b.get('guests')) if b.get('guests') not in (None, '') else 1
+    except Exception: raise ApiError('จำนวนผู้เข้าพักไม่ถูกต้อง')
+    if not 1 <= guests <= max_guests: raise ApiError(f'จำนวนผู้เข้าพักต้องอยู่ระหว่าง 1–{max_guests} คน')
+    return dict(checkin_date=cin, checkin_time=hm, checkout_date=cout, nights=nights, checkin_at=ts, guests=guests)
 
 
 def new_code():
@@ -207,7 +278,8 @@ def user_stats(uid):
       COALESCE(SUM(seller_id=:u AND paid_at IS NOT NULL),0) seller_paid,
       COALESCE(SUM(seller_id=:u AND disputed_at IS NOT NULL),0) seller_disputes,
       COALESCE(SUM(seller_id=:u AND on_time IS NOT NULL),0) shipped_n,
-      COALESCE(SUM(seller_id=:u AND on_time=1),0) on_time_n
+      COALESCE(SUM(seller_id=:u AND on_time=1),0) on_time_n,
+      COALESCE(SUM(seller_id=:u AND kind='stay' AND status IN ('completed','partial')),0) stays
       FROM deals WHERE seller_id=:u OR buyer_id=:u""", {'u': uid})
     rs = q1("SELECT COUNT(*) n, AVG(stars) a FROM reviews WHERE to_id=? AND target_role='seller'", (uid,))
     rb = q1("SELECT COUNT(*) n, AVG(stars) a FROM reviews WHERE to_id=? AND target_role='buyer'", (uid,))
@@ -227,7 +299,7 @@ def user_stats(uid):
                 buyer_rating=round(rb['a'], 2) if rb['n'] else None, buyer_reviews=rb['n'],
                 dispute_rate=round(disp_rate * 100, 1), disputes=r['seller_disputes'],
                 on_time_rate=round(100 * r['on_time_n'] / r['shipped_n']) if r['shipped_n'] else None,
-                level=level, level_name=level_name, seller_limit=limit, buyer_limit=buyer_limit)
+                level=level, level_name=level_name, seller_limit=limit, buyer_limit=buyer_limit, stays_hosted=r['stays'])
 
 
 def public_user(u, stats=True):
@@ -256,9 +328,10 @@ def complete(d, reason, at=None):
        (at, reason, d['seller_get'], on_time, d['id']))
     ex('INSERT INTO payouts(user_id,deal_id,amount,created_at) VALUES(?,?,?,?)', (d['seller_id'], d['id'], d['seller_get'], now()))
     why = {'buyer_confirm': 'ผู้ซื้อยืนยันรับของแล้ว', 'meet_code': 'ยืนยันด้วยรหัสนัดรับแล้ว',
+           'guest_checkin': 'ผู้เข้าพักยืนยันเช็คอินแล้ว ที่พักตรงปก', 'checkin_code': 'ผู้เข้าพักกรอกรหัสเช็คอินถูกต้อง',
            'auto': 'ครบกำหนดเวลา ระบบปล่อยเงินอัตโนมัติ', 'admin': 'ทีมงานตัดสินให้ปล่อยเงิน'}.get(reason, '')
     notify(d['seller_id'], d['code'], f'{why} · เงิน {fmt_baht(d["seller_get"])} รอโอนรอบถัดไป (วันละครั้ง)', 'wallet')
-    notify(d['buyer_id'], d['code'], f'ดีล "{d["title"]}" สำเร็จแล้ว อย่าลืมให้คะแนนผู้ขายนะ', 'check')
+    notify(d['buyer_id'], d['code'], f'ดีล "{d["title"]}" สำเร็จแล้ว ' + ('ขอให้พักผ่อนให้สนุก อย่าลืมรีวิวที่พักนะ' if is_stay(d) else 'อย่าลืมให้คะแนนผู้ขายนะ'), 'check')
 
 
 def process(d):
@@ -274,12 +347,15 @@ def process(d):
     if d['status'] == 'delivered' and d['auto_release_at'] and t >= d['auto_release_at']:
         complete(d, 'auto', at=d['auto_release_at'])
         d = get_deal(d['code'])
+    if d['status'] == 'held' and is_stay(d) and d['auto_release_at'] and t >= d['auto_release_at']:
+        complete(d, 'auto', at=d['auto_release_at'])  # ผู้เข้าพักไม่ยืนยัน/ไม่แจ้งปัญหาภายใน 24 ชม. หลังเวลาเช็คอิน
+        d = get_deal(d['code'])
     return d
 
 
 def process_all():
     with LOCK:
-        for d in q("SELECT * FROM deals WHERE status IN ('shipped','delivered')"):
+        for d in q("SELECT * FROM deals WHERE status IN ('shipped','delivered') OR (status='held' AND kind='stay')"):
             process(d)
         db.commit()
 
@@ -294,7 +370,8 @@ def deal_view(d, me):
     if not party and st != 'open':
         raise ApiError('ดีลนี้มีผู้ซื้อและผู้ขายครบแล้ว เฉพาะคู่ดีลเท่านั้นที่ดูรายละเอียดได้', 403)
     acts = []
-    overdue = t > due_ts(d['due_date'])
+    stay = is_stay(d)
+    overdue = (not stay) and t > due_ts(d['due_date'])
     dispute_until = None
     if st == 'delivered' and d['delivered_at']:
         dispute_until = min(d['delivered_at'] + DISPUTE_WINDOW, d['auto_release_at'] or 1e18)
@@ -304,6 +381,13 @@ def deal_view(d, me):
     elif st == 'accepted':
         if role == 'buyer': acts += ['pay', 'cancel']
         elif role == 'seller': acts.append('cancel')
+    elif st == 'held' and stay:
+        cin = d['checkin_at']
+        if role == 'seller': acts += ['checkin_show', 'host_cancel']
+        if role == 'buyer':
+            if t >= day_start(cin): acts += ['checkin_confirm', 'checkin_enter']
+            if t >= cin: acts.append('stay_problem')
+            else: acts.append('guest_cancel')
     elif st == 'held':
         if role == 'seller':
             acts.append({'parcel': 'ship_parcel', 'messenger': 'ship_messenger', 'meet': 'meet_show'}[d['delivery']])
@@ -322,9 +406,14 @@ def deal_view(d, me):
     if party and st in ('accepted', 'held', 'shipped', 'delivered', 'disputed'): acts.append('skip')
     out = {k: d[k] for k in d.keys() if k not in ('meet_code', 'meet_tries', 'creator_id')}
     for k in ('photos', 'proof_photos', 'dispute_files'): out[k] = jl(d[k])
-    if role == 'seller' and d['delivery'] == 'meet' and st == 'held': out['meet_code'] = d['meet_code']
+    if role == 'seller' and (d['delivery'] == 'meet' or stay) and st == 'held': out['meet_code'] = d['meet_code']
     if not party:
-        for k in ('dispute_files', 'dispute_detail', 'tracking', 'proof_text', 'proof_photos'): out[k] = None
+        for k in ('dispute_files', 'dispute_detail', 'tracking', 'proof_text', 'proof_photos', 'dispute_location'): out[k] = None
+    if stay:
+        cin = d['checkin_at']
+        fcu = cin - (d['free_cancel_days'] or 0) * DAY
+        out.update(checkin_day_start=day_start(cin), free_cancel_until=fcu, free_cancel_now=t <= fcu,
+                   release_at=d['auto_release_at'] or cin + STAY_RELEASE)
     out.update(my_role=role, actions=acts, deal_now=t, due_ts=due_ts(d['due_date']), overdue=overdue,
                dispute_until=dispute_until, is_creator=bool(uid and d['creator_id'] == uid))
     out['seller'] = public_user(get_user(d['seller_id']))
@@ -482,7 +571,7 @@ def review_list(uid, role, limit):
 
 @route('GET', '/api/deals')
 def api_deals(req, me, b):
-    for d in q("SELECT * FROM deals WHERE (seller_id=? OR buyer_id=?) AND status IN ('shipped','delivered')", (me['id'], me['id'])):
+    for d in q("SELECT * FROM deals WHERE (seller_id=? OR buyer_id=?) AND (status IN ('shipped','delivered') OR (status='held' AND kind='stay'))", (me['id'], me['id'])):
         process(d)
     rows = q("""SELECT d.*, s.name s_name, s.shop_name s_shop, s.avatar s_avatar, bu.name b_name, bu.avatar b_avatar FROM deals d
                 LEFT JOIN users s ON s.id=d.seller_id LEFT JOIN users bu ON bu.id=d.buyer_id
@@ -499,7 +588,8 @@ def api_deals(req, me, b):
                         other_initial=initial(other) if other else None,
                         created_at=r['created_at'], updated_at=max(x for x in (r['created_at'], r['accepted_at'], r['paid_at'], r['shipped_at'],
                             r['delivered_at'], r['completed_at'], r['refunded_at'], r['cancelled_at'], r['disputed_at']) if x),
-                        chat_unread=thread_unread(th['id'], me['id']) if th else 0, is_demo=bool(r['is_demo'])))
+                        chat_unread=thread_unread(th['id'], me['id']) if th else 0, is_demo=bool(r['is_demo']),
+                        kind=r['kind'] or 'goods', checkin_at=r['checkin_at'], nights=r['nights']))
     p = q1("SELECT COALESCE(SUM(amount),0) s, COUNT(*) n FROM payouts WHERE user_id=? AND status='pending'", (me['id'],))
     return {'deals': out, 'pending_payout': p['s'], 'pending_count': p['n']}
 
@@ -507,31 +597,47 @@ def api_deals(req, me, b):
 @route('POST', '/api/deals')
 def api_create_deal(req, me, b):
     role = b.get('role')
-    if role not in ('seller', 'buyer'): raise ApiError('กรุณาเลือกว่าคุณเป็นผู้ขายหรือผู้ซื้อ')
-    title = s_(b.get('title'), 120)
-    if not title: raise ApiError('กรุณากรอกชื่อสินค้า')
+    kind = 'stay' if b.get('kind') == 'stay' else 'goods'
+    if role not in ('seller', 'buyer'):
+        raise ApiError('กรุณาเลือกว่าคุณเป็นเจ้าของที่พักหรือผู้เข้าพัก' if kind == 'stay' else 'กรุณาเลือกว่าคุณเป็นผู้ขายหรือผู้ซื้อ')
+    stay = {}
+    if kind == 'stay':
+        stay = stay_common(b); stay.update(stay_dates(b))
+        title, delivery, due = stay['title'], 'stay', stay['checkin_date']
+    else:
+        title = s_(b.get('title'), 120)
+        if not title: raise ApiError('กรุณากรอกชื่อสินค้า')
     try: price = money(str(b.get('price')).replace(',', ''))
     except Exception: raise ApiError('กรุณากรอกราคาเป็นตัวเลข')
     if price < MIN_PRICE: raise ApiError(f'ราคาขั้นต่ำ {MIN_PRICE} บาท')
     if price > MAX_PRICE: raise ApiError('ราคาสูงเกินไป')
-    delivery = b.get('delivery')
-    if delivery not in DELIVERIES: raise ApiError('กรุณาเลือกวิธีส่งมอบ')
+    if kind == 'goods':
+        delivery = b.get('delivery')
+        if delivery not in DELIVERIES: raise ApiError('กรุณาเลือกวิธีส่งมอบ')
     fee_payer = b.get('fee_payer')
     if fee_payer not in FEE_PAYERS: raise ApiError('กรุณาเลือกผู้จ่ายค่าธรรมเนียม')
-    due = s_(b.get('due_date'), 10)
-    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', due): raise ApiError('กรุณาเลือกวันที่ตกลงส่งของ')
-    if due < today_str(): raise ApiError('วันที่ส่งของต้องไม่ใช่วันที่ผ่านมาแล้ว')
+    if kind == 'goods':
+        due = s_(b.get('due_date'), 10)
+        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', due): raise ApiError('กรุณาเลือกวันที่ตกลงส่งของ')
+        if due < today_str(): raise ApiError('วันที่ส่งของต้องไม่ใช่วันที่ผ่านมาแล้ว')
     check_limits(me, role, price)
     photos = save_files(b.get('photos'), max_n=6)
     f = calc_fee(price, fee_payer)
     code = new_code()
-    ex("""INSERT INTO deals(code,creator_id,creator_role,seller_id,buyer_id,title,description,price,photos,delivery,due_date,
-          fee_payer,fee,buyer_fee,seller_fee,buyer_pay,seller_get,status,created_at)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?)""",
+    did = ex("""INSERT INTO deals(code,creator_id,creator_role,seller_id,buyer_id,title,description,price,photos,delivery,due_date,
+          fee_payer,fee,buyer_fee,seller_fee,buyer_pay,seller_get,status,created_at,kind)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?)""",
        (code, me['id'], role, me['id'] if role == 'seller' else None, me['id'] if role == 'buyer' else None,
         title, s_(b.get('description'), 500), price, json.dumps(photos), delivery, due, fee_payer,
-        f['fee'], f['buyer_fee'], f['seller_fee'], f['buyer_pay'], f['seller_get'], now()))
+        f['fee'], f['buyer_fee'], f['seller_fee'], f['buyer_pay'], f['seller_get'], now(), kind))
+    if stay: set_stay(did, stay)
     return {'code': code}
+
+
+def set_stay(did, st):
+    ex("""UPDATE deals SET address=?, map_url=?, checkin_at=?, checkout_date=?, nights=?, guests=?, host_contact=?, free_cancel_days=?
+          WHERE id=?""", (st['address'], st['map_url'], st['checkin_at'], st['checkout_date'], st['nights'], st['guests'],
+                          st['host_contact'], st['free_cancel_days'], did))
 
 
 @route('GET', r'/api/deals/([A-Z0-9-]+)', auth=False)
@@ -566,6 +672,16 @@ def api_accept(req, me, b, code):
 def api_pay(req, me, b, code):
     d = act(code, me); require_party(d, me, 'buyer')
     if d['status'] != 'accepted': raise ApiError('ดีลนี้ยังจ่ายไม่ได้ หรือจ่ายไปแล้ว')
+    if is_stay(d):
+        t = dnow(d)
+        if t >= d['checkin_at'] + STAY_RELEASE: raise ApiError('เลยเวลาเช็คอินมานานแล้ว จ่ายดีลนี้ไม่ได้ กรุณาสร้างดีลใหม่')
+        code4 = f'{random.randint(0, 9999):04d}'
+        ex("UPDATE deals SET status='held', paid_at=?, meet_code=?, auto_release_at=? WHERE id=?",
+           (t, code4, max(d['checkin_at'], t) + STAY_RELEASE, d['id']))
+        notify(d['seller_id'], code, f'ผู้เข้าพักจ่ายแล้ว {fmt_baht(d["buyer_pay"])} (จำลอง) เงินพักไว้จนเช็คอิน · '
+               'วันเช็คอินบอกรหัส 4 หลักให้ผู้เข้าพักกรอกเมื่อเข้าห้องได้แล้ว', 'lock')
+        notify(d['buyer_id'], code, f'ชำระเงิน {fmt_baht(d["buyer_pay"])} สำเร็จ (จำลอง) เงินพักไว้ · เจ้าของที่พักได้เงินเมื่อคุณเช็คอินได้จริง', 'lock')
+        return {'ok': True}
     meet = f'{random.randint(0, 9999):04d}' if d['delivery'] == 'meet' else None
     ex("UPDATE deals SET status='held', paid_at=?, meet_code=? WHERE id=?", (dnow(d), meet, d['id']))
     notify(d['seller_id'], code, f'ผู้ซื้อจ่ายแล้ว {fmt_baht(d["buyer_pay"])} (จำลอง) เงินพักไว้แล้ว · ' +
@@ -577,6 +693,7 @@ def api_pay(req, me, b, code):
 @route('POST', r'/api/deals/([A-Z0-9-]+)/ship')
 def api_ship(req, me, b, code):
     d = act(code, me); require_party(d, me, 'seller')
+    if is_stay(d): raise ApiError('ดีลที่พักไม่มีขั้นตอนส่งของ ผู้เข้าพักยืนยันตอนเช็คอิน')
     if d['status'] != 'held': raise ApiError('ยังส่งของไม่ได้ในขั้นตอนนี้')
     t = dnow(d)
     on_time = 1 if t <= due_ts(d['due_date']) else 0
@@ -612,6 +729,11 @@ def api_sim_delivered(req, me, b, code):
 @route('POST', r'/api/deals/([A-Z0-9-]+)/confirm')
 def api_confirm(req, me, b, code):
     d = act(code, me); require_party(d, me, 'buyer')
+    if is_stay(d):
+        if d['status'] != 'held': raise ApiError('ยืนยันเช็คอินไม่ได้ในขั้นตอนนี้')
+        if dnow(d) < day_start(d['checkin_at']): raise ApiError('ยืนยันเช็คอินได้ตั้งแต่วันเช็คอินเท่านั้น')
+        complete(d, 'guest_checkin')
+        return {'ok': True}
     if d['status'] not in ('shipped', 'delivered'): raise ApiError('ยังยืนยันรับของไม่ได้ในขั้นตอนนี้')
     complete(d, 'buyer_confirm')
     return {'ok': True}
@@ -620,13 +742,14 @@ def api_confirm(req, me, b, code):
 @route('POST', r'/api/deals/([A-Z0-9-]+)/meet-code')
 def api_meet_code(req, me, b, code):
     d = act(code, me); require_party(d, me, 'buyer')
-    if d['status'] != 'held' or d['delivery'] != 'meet': raise ApiError('ใช้ได้เฉพาะดีลนัดรับที่จ่ายเงินแล้ว')
+    if d['status'] != 'held' or d['delivery'] not in ('meet', 'stay'): raise ApiError('ใช้ได้เฉพาะดีลนัดรับ/ดีลที่พักที่จ่ายเงินแล้ว')
+    if is_stay(d) and dnow(d) < day_start(d['checkin_at']): raise ApiError('กรอกรหัสเช็คอินได้ตั้งแต่วันเช็คอินเท่านั้น')
     if d['meet_tries'] >= 5: raise ApiError('กรอกผิดเกิน 5 ครั้ง กรุณาติดต่อทีมงาน')
     c = re.sub(r'\D', '', s_(b.get('code'), 10))
     if c != d['meet_code']:
         ex('UPDATE deals SET meet_tries=meet_tries+1 WHERE id=?', (d['id'],))
         raise ApiError(f'รหัสไม่ถูกต้อง (เหลือ {4 - d["meet_tries"]} ครั้ง)')
-    complete(d, 'meet_code')
+    complete(d, 'checkin_code' if is_stay(d) else 'meet_code')
     return {'ok': True}
 
 
@@ -634,6 +757,7 @@ def api_meet_code(req, me, b, code):
 def api_dispute(req, me, b, code):
     d = act(code, me); require_party(d, me, 'buyer')
     t = dnow(d)
+    if is_stay(d): return stay_problem(d, b, t)
     if d['status'] not in ('shipped', 'delivered'): raise ApiError('แจ้งปัญหาได้หลังผู้ขายส่งของแล้ว และก่อนเงินถูกปล่อย')
     if d['status'] == 'delivered' and t > min(d['delivered_at'] + DISPUTE_WINDOW, d['auto_release_at']):
         raise ApiError('เลยเวลาแจ้งปัญหาแล้ว')
@@ -648,9 +772,28 @@ def api_dispute(req, me, b, code):
     return {'ok': True}
 
 
+def stay_problem(d, b, t):
+    """ผู้เข้าพักแจ้ง: ไม่มีที่พักจริง / ไม่ตรงปก / เข้าพักไม่ได้ — ตั้งแต่เวลาเช็คอินจนถึงเวลาปล่อยเงินอัตโนมัติ"""
+    if d['status'] != 'held': raise ApiError('แจ้งปัญหาได้เฉพาะตอนเงินยังพักไว้')
+    if t < d['checkin_at']: raise ApiError('แจ้งปัญหาได้ตั้งแต่เวลาเช็คอิน ถ้ายังไม่ถึงวันเข้าพักให้ใช้ปุ่มยกเลิกการจอง')
+    if t > d['auto_release_at']: raise ApiError('เลยเวลาแจ้งปัญหาแล้ว (24 ชม. หลังเวลาเช็คอิน)')
+    reason = b.get('reason')
+    if reason not in STAY_REASONS: raise ApiError('กรุณาเลือกปัญหาที่พบ')
+    loc = s_(b.get('location'), 300)
+    if len(loc) < 3: raise ApiError('กรุณาระบุตำแหน่งที่คุณอยู่ตอนนี้ (เช่น หน้าซอย/จุดที่ปักหมุดไว้)')
+    files = save_files(b.get('files'), allow=('image', 'video'), max_n=4)
+    if not files: raise ApiError('กรุณาแนบรูปหรือวิดีโอหลักฐาน ณ ที่พักอย่างน้อย 1 ไฟล์')
+    ex("""UPDATE deals SET status='disputed', disputed_at=?, dispute_reason=?, dispute_detail=?, dispute_files=?, dispute_location=? WHERE id=?""",
+       (t, reason, s_(b.get('detail'), 1000), json.dumps(files), loc, d['id']))
+    notify(d['seller_id'], d['code'], f'ผู้เข้าพักแจ้งปัญหา: {reason} · เงินถูกพักไว้ระหว่างทีมงานตรวจสอบ', 'warn')
+    notify(d['buyer_id'], d['code'], 'ส่งเรื่องแล้ว ทีมงานจะติดต่อโดยเร็ว เงินยังพักไว้อย่างปลอดภัย ไม่โอนให้เจ้าของที่พัก', 'warn')
+    return {'ok': True}
+
+
 @route('POST', r'/api/deals/([A-Z0-9-]+)/late-refund')
 def api_late_refund(req, me, b, code):
     d = act(code, me); require_party(d, me, 'buyer')
+    if is_stay(d): raise ApiError('ดีลที่พักใช้ปุ่มยกเลิกการจองแทน')
     if d['status'] != 'held': raise ApiError('ขอคืนเงินแบบนี้ได้เฉพาะตอนผู้ขายยังไม่ส่งของ')
     if dnow(d) <= due_ts(d['due_date']): raise ApiError('ยังไม่เลยวันที่ตกลงส่งของ')
     ex("UPDATE deals SET status='refunded', refunded_at=?, refund_amount=?, resolution='late', on_time=0 WHERE id=?",
@@ -663,6 +806,7 @@ def api_late_refund(req, me, b, code):
 @route('POST', r'/api/deals/([A-Z0-9-]+)/cancel')
 def api_cancel(req, me, b, code):
     d = act(code, me)
+    if d['status'] == 'held' and is_stay(d): return stay_cancel(d, me, b)
     if d['status'] not in ('open', 'accepted'): raise ApiError('ยกเลิกได้เฉพาะก่อนจ่ายเงิน')
     if me['id'] not in (d['seller_id'], d['buyer_id']): raise ApiError('คุณไม่ได้อยู่ในดีลนี้', 403)
     ex("UPDATE deals SET status='cancelled', cancelled_at=? WHERE id=?", (dnow(d), d['id']))
@@ -671,9 +815,41 @@ def api_cancel(req, me, b, code):
     return {'ok': True}
 
 
+def stay_cancel(d, me, b):
+    """ยกเลิกการจองหลังจ่ายเงินแล้ว: เจ้าของยกเลิก = คืนเต็ม · ผู้เข้าพักยกเลิกในช่วงยกเลิกฟรี = คืนเต็ม · หลังจากนั้น = ส่งทีมงานตัดสิน"""
+    r = require_party(d, me)
+    t = dnow(d); code = d['code']
+    def refund(why):
+        ex("UPDATE deals SET status='refunded', refunded_at=?, refund_amount=?, resolution=? WHERE id=?", (t, d['buyer_pay'], why, d['id']))
+        notify(d['buyer_id'], code, f'คืนเงิน {fmt_baht(d["buyer_pay"])} ให้คุณเต็มจำนวนแล้ว (จำลอง)', 'wallet')
+    if r == 'seller':
+        refund('host_cancel')
+        notify(d['seller_id'], code, f'คุณยกเลิกการจอง "{d["title"]}" แล้ว · คืนเงินผู้เข้าพักเต็มจำนวน', 'warn')
+        notify(d['buyer_id'], code, f'เจ้าของที่พักยกเลิกการจอง "{d["title"]}" · ระบบคืนเงินให้คุณเต็มจำนวน', 'warn')
+        return {'ok': True, 'result': 'refunded'}
+    if t >= d['checkin_at']: raise ApiError('ถึงเวลาเช็คอินแล้ว ยกเลิกไม่ได้ ถ้ามีปัญหาให้กด "แจ้งปัญหา"')
+    if t <= d['checkin_at'] - (d['free_cancel_days'] or 0) * DAY:
+        refund('guest_cancel')
+        notify(d['seller_id'], code, f'ผู้เข้าพักยกเลิกการจอง "{d["title"]}" ภายในช่วงยกเลิกฟรี · คืนเงินผู้เข้าพักแล้ว', 'warn')
+        return {'ok': True, 'result': 'refunded'}
+    detail = s_(b.get('reason'), 1000)
+    ex("""UPDATE deals SET status='disputed', disputed_at=?, dispute_reason=?, dispute_detail=?, dispute_files='[]' WHERE id=?""",
+       (t, LATE_CANCEL_REASON, detail, d['id']))
+    notify(d['seller_id'], code, f'ผู้เข้าพักขอยกเลิกหลังหมดเวลายกเลิกฟรี · ทีมงานจะช่วยตัดสินว่าคืนเงินเท่าไร เงินยังพักไว้', 'warn')
+    notify(d['buyer_id'], code, 'ส่งคำขอยกเลิกให้ทีมงานแล้ว (เลยช่วงยกเลิกฟรี) ทีมงานจะคุยกับทั้งสองฝ่ายก่อนตัดสิน', 'warn')
+    return {'ok': True, 'result': 'disputed'}
+
+
 @route('POST', r'/api/deals/([A-Z0-9-]+)/skip')
 def api_skip(req, me, b, code):
     d = act(code, me); require_party(d, me)
+    to = b.get('to')
+    if to in ('checkin', 'after_release'):
+        if not is_stay(d): raise ApiError('ใช้ได้เฉพาะดีลที่พัก')
+        target = d['checkin_at'] + 60 if to == 'checkin' else (d['auto_release_at'] or d['checkin_at'] + STAY_RELEASE) + 60
+        ex('UPDATE deals SET skew=COALESCE(skew,0)+? WHERE id=?', (max(0, target - dnow(d)), d['id']))
+        process(get_deal(code))
+        return {'ok': True}
     try: hours = float(b.get('hours'))
     except Exception: hours = 24
     hours = max(1, min(hours, 24 * 7))
@@ -742,6 +918,7 @@ def api_shop(req, me, b, uid):
 
 @route('POST', '/api/products')
 def api_add_product(req, me, b):
+    if b.get('kind') == 'stay': return add_stay_product(me, b)
     title = s_(b.get('title'), 120)
     if not title: raise ApiError('กรุณากรอกชื่อสินค้า')
     try: price = money(str(b.get('price')).replace(',', ''))
@@ -754,6 +931,25 @@ def api_add_product(req, me, b):
     photos = save_files(b.get('photos'), max_n=6)
     pid = ex('INSERT INTO products(user_id,title,description,price,photos,deliveries,fee_payer,ship_days,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
              (me['id'], title, s_(b.get('description'), 500), price, json.dumps(photos), json.dumps(dl), fp, days, now()))
+    return {'id': pid}
+
+
+def add_stay_product(me, b):
+    """ที่พักในหน้าร้าน: ราคาต่อคืน · ลูกค้าเลือกวันเช็คอิน/จำนวนคืน/ผู้เข้าพักตอนจอง"""
+    st = stay_common(b)
+    try: price = money(str(b.get('price')).replace(',', ''))
+    except Exception: raise ApiError('กรุณากรอกราคาต่อคืนเป็นตัวเลข')
+    if price < MIN_PRICE or price > MAX_PRICE: raise ApiError(f'ราคาต่อคืนต้องอยู่ระหว่าง {MIN_PRICE} – {MAX_PRICE:,} บาท')
+    hm = s_(b.get('checkin_time'), 5) or '14:00'
+    if not re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d', hm): raise ApiError('เวลาเช็คอินไม่ถูกต้อง (เช่น 14:00)')
+    try: mg = max(1, min(int(b.get('max_guests') or 2), 30))
+    except Exception: mg = 2
+    fp = b.get('fee_payer') if b.get('fee_payer') in FEE_PAYERS else 'half'
+    photos = save_files(b.get('photos'), max_n=6)
+    pid = ex("""INSERT INTO products(user_id,title,description,price,photos,deliveries,fee_payer,ship_days,created_at,kind,address,map_url,
+                  checkin_time,max_guests,free_cancel_days,host_contact) VALUES(?,?,?,?,?,'["stay"]',?,0,?,'stay',?,?,?,?,?,?)""",
+             (me['id'], st['title'], s_(b.get('description'), 500), price, json.dumps(photos), fp, now(), st['address'], st['map_url'],
+              hm, mg, st['free_cancel_days'], st['host_contact']))
     return {'id': pid}
 
 
@@ -771,6 +967,7 @@ def api_buy(req, me, b, pid):
     if not p: raise ApiError('สินค้านี้ไม่มีแล้ว', 404)
     if p['user_id'] == me['id']: raise ApiError('นี่คือสินค้าในร้านของคุณเอง')
     seller = get_user(p['user_id'])
+    if (p['kind'] or 'goods') == 'stay': return buy_stay(me, seller, p, b)
     dl = b.get('delivery')
     if dl not in jl(p['deliveries']): raise ApiError('กรุณาเลือกวิธีส่งมอบ')
     check_limits(me, 'buyer', p['price'])
@@ -784,6 +981,25 @@ def api_buy(req, me, b, pid):
        (code, me['id'], seller['id'], me['id'], p['id'], p['title'], p['description'], p['price'], p['photos'], dl, due,
         p['fee_payer'], f['fee'], f['buyer_fee'], f['seller_fee'], f['buyer_pay'], f['seller_get'], t, t, 0))
     notify(seller['id'], code, f'มีคำสั่งซื้อใหม่จากหน้าร้าน: "{p["title"]}" โดย {me["name"]} · รอผู้ซื้อจ่ายเงิน', 'store')
+    return {'code': code}
+
+
+def buy_stay(me, seller, p, b):
+    sd = stay_dates(dict(b, checkin_time=p['checkin_time'] or '14:00'), max_guests=p['max_guests'] or 30)
+    price = money(p['price'] * sd['nights'])
+    if price > MAX_PRICE: raise ApiError('ยอดรวมสูงเกินไป')
+    check_limits(me, 'buyer', price)
+    check_limits(seller, 'seller', price)
+    f = calc_fee(price, p['fee_payer'])
+    code = new_code(); t = now()
+    did = ex("""INSERT INTO deals(code,creator_id,creator_role,seller_id,buyer_id,product_id,source,title,description,price,photos,delivery,due_date,
+          fee_payer,fee,buyer_fee,seller_fee,buyer_pay,seller_get,status,created_at,accepted_at,kind)
+          VALUES(?,?,'buyer',?,?,?,'shop',?,?,?,?,'stay',?,?,?,?,?,?,?,'accepted',?,?,'stay')""",
+       (code, me['id'], seller['id'], me['id'], p['id'], p['title'], p['description'], price, p['photos'], sd['checkin_date'],
+        p['fee_payer'], f['fee'], f['buyer_fee'], f['seller_fee'], f['buyer_pay'], f['seller_get'], t, t))
+    sd.update(address=p['address'], map_url=p['map_url'], host_contact=p['host_contact'] or seller['name'], free_cancel_days=p['free_cancel_days'] or 0)
+    set_stay(did, sd)
+    notify(seller['id'], code, f'มีการจองที่พักจากหน้าร้าน: "{p["title"]}" {sd["nights"]} คืน โดย {me["name"]} · รอผู้เข้าพักจ่ายเงิน', 'store')
     return {'code': code}
 
 
@@ -882,7 +1098,7 @@ def thread_view(t, viewer, after=0):
     out = dict(id=t['id'], kind=t['kind'], users=users, messages=msgs, closed=thread_closed(t, d),
                last_id=msgs[-1]['id'] if msgs else int(after or 0))
     if d: out['deal'] = dict(code=d['code'], title=d['title'], status=d['status'], price=d['price'], photo=(jl(d['photos']) or [None])[0],
-                             seller_id=d['seller_id'], buyer_id=d['buyer_id'])
+                             seller_id=d['seller_id'], buyer_id=d['buyer_id'], kind=d['kind'] or 'goods')
     if viewer != ADMIN_UID:
         oid = t['user_b'] if viewer == t['user_a'] else t['user_a']
         out['other'] = users.get(oid)
@@ -1211,6 +1427,11 @@ if __name__ == '__main__':
             seed.run(db)
             db.commit()
             print('ใส่ข้อมูลตัวอย่าง (demo) แล้ว', flush=True)
+        elif not q1("SELECT 1 FROM users WHERE phone='0800000003'"):
+            import seed
+            seed.run_stay(db)
+            db.commit()
+            print('เพิ่มที่พักตัวอย่างแล้ว', flush=True)
     threading.Thread(target=ticker, daemon=True).start()
     if ADMIN_PASSWORD_GENERATED:
         print(f'[admin] ไม่ได้ตั้ง ADMIN_PASSWORD – สุ่มรหัสผู้ดูแลชั่วคราว: {ADMIN_PASSWORD}', flush=True)
