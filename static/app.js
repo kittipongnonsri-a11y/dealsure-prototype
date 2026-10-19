@@ -161,6 +161,19 @@ const noteHtml = (kind, html) => {
   return `<div class="note ${kind}">${ic(icon, 16, 'color:' + col)}<div>${html}</div></div>`;
 };
 
+/* ---------------- "ดูเพิ่ม" lists: show 5, then +5 per tap ---------------- */
+const MORE = {};
+function pagedList(key, items, rowFn, step = 5, cls = '') {
+  MORE[key] = {items, rowFn, n: Math.min(step, items.length), step};
+  return `<div class="${cls}" id="pl-${key}">${pagedHtml(key)}</div>`;
+}
+function pagedHtml(key) {
+  const m = MORE[key], rest = m.items.length - m.n;
+  return m.items.slice(0, m.n).map(m.rowFn).join('') +
+    (rest > 0 ? `<button class="btn ghost sm more-btn" onclick="pagedMore('${key}')">ดูเพิ่ม (อีก ${rest} รายการ)</button>` : '');
+}
+function pagedMore(key) { const m = MORE[key]; m.n = Math.min(m.items.length, m.n + m.step); $('#pl-' + key).innerHTML = pagedHtml(key); }
+
 /* ---------------- router ---------------- */
 function route() { const h = location.hash.replace(/^#\/?/, ''); const [p, a] = h.split('/'); return {p: p || 'home', a: a ? decodeURIComponent(a) : ''}; }
 let navDepth = 0;
@@ -314,7 +327,7 @@ async function vHome() {
       ${S.chatUnread ? `<a class="chat-cta mt12" href="#/chats">${ic('chat', 20)}<span class="grow">มีข้อความใหม่ ${S.chatUnread} ข้อความ</span><span class="link">เปิดแชท →</span></a>` : ''}
       <h3 class="sec-h">${ic('list', 18)}ดีลล่าสุด · กำลังดำเนินการ <span class="muted small">${act.length} ดีล</span></h3>
       ${act.length ? `<div class="dcards">${act.map(row).join('')}</div>` : `<div class="card"><div class="empty-st"><div class="big">🤝</div>ยังไม่มีดีล ลองสร้างดีลแล้วส่งลิงก์ให้อีกฝ่ายทาง LINE ดูสิ</div></div>`}
-      ${done.length ? `<h3 class="sec-h">${ic('check', 18)}ดีลที่จบแล้ว <span class="muted small">${done.length} ดีล</span></h3><div class="dcards">${done.map(row).join('')}</div>` : ''}
+      ${done.length ? `<h3 class="sec-h">${ic('check', 18)}ดีลที่จบแล้ว <span class="muted small">${done.length} ดีล</span></h3>${pagedList('done', done, row, 5, 'dcards')}` : ''}
       ${shops ? `<div class="card"><h3>${ic('store', 18)}ร้านแนะนำ</h3>${shops}</div>` : ''}
       ${noteHtml('info', '<b>โหมดทดลอง – ไม่มีเงินจริง</b> การจ่ายเงิน การโอน และการยืนยันตัวตนทั้งหมดเป็นการจำลอง ใช้ปุ่ม “เร่งเวลา (ทดสอบ)” ในหน้าดีลเพื่อข้ามเวลารอได้')}
     </div>`;
@@ -890,8 +903,8 @@ async function vUser(id) {
       </div>
       <a class="btn ghost sm mt12" href="#/shop/${u.id}">${ic('store', 16)}ดูหน้าร้าน${u.product_count ? ` (${u.product_count} สินค้า)` : ''}</a></div>
     <div class="card"><h3>${ic('list', 18)}ประวัติดีล <span class="muted small" style="font-weight:400;margin-left:auto">ล่าสุด ${u.history.length} ดีล</span></h3>
-      ${u.history.length ? u.history.map(h => `<div class="hist"><div class="grow"><div class="ell"><b>${esc(h.title)}</b></div><div class="small muted">${h.role === 'seller' ? 'ขาย' : 'ซื้อ'} · ${h.at ? dShort(h.at) : ''}</div></div>
-        <div style="text-align:right">${h.code ? `<a class="small" href="#/d/${h.code}">${baht(h.price)}</a>` : `<span class="small">${baht(h.price)}</span>`}<br>${stLabel(h.status, h.role)}</div></div>`).join('') : '<div class="empty-st">ยังไม่มีดีลที่จบแล้ว</div>'}</div>
+      ${u.history.length ? pagedList('hist', u.history, h => `<div class="hist"><div class="grow"><div class="ell"><b>${esc(h.title)}</b></div><div class="small muted">${h.role === 'seller' ? 'ขาย' : 'ซื้อ'} · ${h.at ? dShort(h.at) : ''}</div></div>
+        <div style="text-align:right">${h.code ? `<a class="small" href="#/d/${h.code}">${baht(h.price)}</a>` : `<span class="small">${baht(h.price)}</span>`}<br>${stLabel(h.status, h.role)}</div></div>`) : '<div class="empty-st">ยังไม่มีดีลที่จบแล้ว</div>'}</div>
     ${reviewsCard(u, u.reviews, 'รีวิวที่ได้รับ')}</div>`;
 }
 async function vMe() {
@@ -904,7 +917,7 @@ async function vMe() {
       <div class="twobtn mt8"><a class="btn ghost sm" href="#/u/${u.id}">โปรไฟล์สาธารณะ</a><a class="btn ghost sm" href="#/shop/${u.id}">หน้าร้านของฉัน</a></div></div>
     <div class="card"><h3>${ic('wallet', 18)}เงินขายของฉัน</h3>
       <div class="row2"><div class="grow"><div class="small muted">รอโอนรอบถัดไป (วันละครั้ง 18:00 น.)</div><b class="prompt" style="font-size:22px;color:var(--tq-t)">${baht(pay.pending)}</b></div><span class="badge b-green">จำลอง</span></div>
-      ${pay.items.length ? pay.items.slice(0, 8).map(p => `<div class="hist"><a class="grow ell" href="#/d/${p.code}">${esc(p.title)}</a><div style="text-align:right"><b class="small">${baht(p.amount)}</b><br>${p.status === 'pending' ? '<span class="spill sp-wait">รอโอนรอบถัดไป (วันละครั้ง)</span>' : '<span class="spill sp-done">โอนแล้ว (จำลอง)</span>'}</div></div>`).join('') : '<p class="small muted mt8">ยังไม่มีเงินขาย</p>'}
+      ${pay.items.length ? pagedList('pay', pay.items, p => `<div class="hist"><a class="grow ell" href="#/d/${p.code}">${esc(p.title)}</a><div style="text-align:right"><b class="small">${baht(p.amount)}</b><br>${p.status === 'pending' ? '<span class="spill sp-wait">รอโอนรอบถัดไป (วันละครั้ง)</span>' : '<span class="spill sp-done">โอนแล้ว (จำลอง)</span>'}</div></div>`) : '<p class="small muted mt8">ยังไม่มีเงินขาย</p>'}
       <p class="small muted mt8">ในแอปจริง: ผูกบัญชีธนาคาร / พร้อมเพย์ เพื่อรับเงิน (ยังไม่เปิดในโหมดทดลอง)</p></div>
     <div class="card"><h3>${ic('shield', 18)}ยืนยันตัวตน</h3>
       ${u.verified ? noteHtml('ok', '<b>ยืนยันตัวตนแล้ว</b> (ทดสอบ – อนุมัติอัตโนมัติ) สร้างดีลเกิน 3,000 บาทได้') : `<p class="small muted">จำเป็นสำหรับดีลที่เกิน 3,000 บาท</p><button class="btn primary sm mt8" onclick="idSheet()">ยืนยันตัวตน (ทดสอบ)</button>`}

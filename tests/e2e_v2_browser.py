@@ -153,6 +153,26 @@ with sync_playwright() as p:
     B.goto(BASE + f'/#/shop/{S.evaluate("S.me.id")}'); B.wait_for_selector('.shophead .avatar.has-img'); shot(B, '16-shop-page-avatar')
     B.goto(BASE + '/#/'); B.wait_for_selector('.dcard .avatar.has-img'); B.locator('.sec-h').first.scroll_into_view_if_needed(); B.evaluate('window.scrollBy(0,-12)'); shot(B, '17-buyer-home-cards-avatar')
     no_hscroll(B, 'หน้าแรกผู้ซื้อ')
+
+    print('11) รายการยาว: แสดง 5 รายการล่าสุด + ปุ่ม "ดูเพิ่ม"')
+    for i in range(7):   # สร้างแล้วยกเลิก 7 ดีล → ไปอยู่ "ดีลที่จบแล้ว"
+        S.evaluate(f"""(async () => {{ const r = await api('/deals', {{role:'seller', title:'ของทดสอบดูเพิ่ม {i + 1} (ทดสอบ)', price:{300 + i * 10}, delivery:'parcel', due_date:todayStr(3), fee_payer:'half'}});
+                       await api('/deals/' + r.code + '/cancel', {{}}); }})()""")
+    S.goto(BASE + '/#/'); S.reload(); S.wait_for_selector('#pl-done .more-btn')
+    n0 = S.locator('#pl-done .dcard').count(); total = 7
+    if n0 != 5: errors.append(f'ดีลที่จบแล้ว ควรแสดง 5 รายการแรก ได้ {n0}')
+    S.evaluate("document.querySelector('#pl-done .more-btn').scrollIntoView({block:'center'})")
+    shot(S, '18-finished-deals-show-more')
+    S.click('#pl-done .more-btn'); S.wait_for_timeout(300)
+    n1 = S.locator('#pl-done .dcard').count()
+    if n1 != total or S.locator('#pl-done .more-btn').count(): errors.append(f'กดดูเพิ่มแล้วควรครบ {total} และปุ่มหายไป ได้ {n1}')
+    gold = B.evaluate("api('/shops').then(r => r.shops.find(s => s.stats.level === 'gold').id)")
+    B.goto(BASE + f'/#/u/{gold}'); B.wait_for_selector('#pl-hist .more-btn')
+    if B.locator('#pl-hist .hist').count() != 5: errors.append('ประวัติดีลควรแสดง 5 รายการแรก')
+    B.click('#pl-hist .more-btn'); B.wait_for_timeout(300)
+    if B.locator('#pl-hist .hist').count() != 10: errors.append('กดดูเพิ่ม 1 ครั้งควรเป็น 10 รายการ')
+    B.evaluate("document.querySelector('#pl-hist .more-btn').scrollIntoView({block:'center'})")
+    shot(B, '19-profile-history-show-more')
     br.close()
 
 print('\nJS errors / ปัญหา:', errors or 'ไม่มี')

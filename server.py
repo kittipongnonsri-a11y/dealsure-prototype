@@ -461,7 +461,7 @@ def api_user(req, me, b, uid):
     out = public_user(u)
     rows = q("""SELECT d.code,d.title,d.price,d.status,d.completed_at,d.refunded_at,d.created_at,d.seller_id,d.buyer_id,d.photos
                 FROM deals d WHERE (d.seller_id=? OR d.buyer_id=?) AND d.status IN ('completed','partial','refunded')
-                ORDER BY COALESCE(d.completed_at,d.refunded_at) DESC LIMIT 30""", (u['id'], u['id']))
+                ORDER BY COALESCE(d.completed_at,d.refunded_at) DESC LIMIT 100""", (u['id'], u['id']))
     out['history'] = [dict(code=r['code'] if me and me['id'] in (r['seller_id'], r['buyer_id']) else None,
                            title=r['title'], price=r['price'], status=r['status'],
                            at=r['completed_at'] or r['refunded_at'], role='seller' if r['seller_id'] == u['id'] else 'buyer',

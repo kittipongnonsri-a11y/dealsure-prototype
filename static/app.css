@@ -553,3 +553,5 @@ details.dchat .msgs{max-height:300px;overflow-y:auto;margin-top:6px}
 .msg.me.team .bub{color:var(--ink);border-radius:18px 18px 6px 18px}
 .mph img{height:180px;max-height:none}
 .mph.n2 img{height:110px}
+.more-btn{margin-top:12px}
+.dcards .more-btn{margin-top:0}

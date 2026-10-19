@@ -121,5 +121,10 @@ print('5) ลบรูปโปรไฟล์ → กลับไปใช้�
 A.ok('/me/avatar', {'remove': True})
 check('กลับไปใช้อักษรย่อ', A.ok('/me')['user']['avatar'] is None)
 
+print('6) ประวัติดีลยาว (ให้แอปแบ่งหน้า "ดูเพิ่ม")')
+gold = [x for x in B.ok('/shops')['shops'] if x['stats']['level'] == 'gold'][0]
+h = B.ok(f'/users/{gold["id"]}')['history']
+check('โปรไฟล์ส่งประวัติได้มากกว่า 30 ดีล (สูงสุด 100) ให้แอปกด "ดูเพิ่ม"', 30 < len(h) <= 100, len(h))
+
 print(f'\nผลรวม: ผ่าน {ok} / ไม่ผ่าน {fail}')
 sys.exit(1 if fail else 0)
