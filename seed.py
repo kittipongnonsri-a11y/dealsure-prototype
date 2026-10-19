@@ -80,6 +80,7 @@ def run(db):
         deal(silver, 190 - i * 7, img, t, p, [72, 20, 8], on_time=0 if i % 9 == 3 else 1)
     deal(silver, 60, 'shirt', 'เสื้อเชิ้ตวินเทจ (ตัวอย่าง)', 350, None, status='refunded', disputed=True)
     run_stay(db)
+    run_v4(db)
 
 
 STAY_REVIEWS5 = ['ที่พักตรงปกมาก วิวดอยสวยกว่าในรูป เจ้าของใจดี', 'จองผ่านดีลชัวร์ สบายใจ เช็คอินแล้วค่อยปล่อยเงิน', 'ห้องสะอาด เงียบสงบ เหมาะกับพักผ่อน',
@@ -129,3 +130,98 @@ def run_stay(db):
                (did, g, host, 'seller', s, rnd.choice(STAY_REVIEWS5 if s == 5 else STAY_REVIEWS4), cin + 2 * DAY))
         ex('INSERT INTO payouts(user_id,deal_id,amount,status,created_at,paid_at) VALUES(?,?,?,?,?,?)',
            (host, did, price - sf, 'paid', cin + 1800, cin + 0.4 * DAY))
+
+
+# ---------------- v4: ช่องทางโซเชียลตัวอย่าง + รีวิวตัวอย่างที่หลากหลาย (มีรูป · ยาว · ติชม 1–3 ดาว · สินค้า/ที่พัก) ----------------
+def _soc(**kw):
+    """kw: key=(h, url, edit, verified) – ข้อมูลตัวอย่าง (ลิงก์ปลอม/โดเมน .example)"""
+    return json.dumps({k: dict(h=v[0], u=v[1], e=v[2], verified=v[3]) for k, v in kw.items()}, ensure_ascii=False)
+
+
+SOCIALS_V4 = {
+    '0800000001': _soc(
+        facebook=('dealsure.demo.padaeng', 'https://www.facebook.com/dealsure.demo.padaeng', 'dealsure.demo.padaeng', True),
+        line=('@demo-padaeng', 'https://line.me/R/ti/p/@demo-padaeng', '@demo-padaeng', False),
+        instagram=('@demo.padaeng.vintage', 'https://www.instagram.com/demo.padaeng.vintage/', '@demo.padaeng.vintage', False),
+        tiktok=('@demo.padaeng', 'https://www.tiktok.com/@demo.padaeng', '@demo.padaeng', False),
+        website=('padaeng.dealsure.example', 'https://padaeng.dealsure.example', 'https://padaeng.dealsure.example', False),
+        phone=('080-000-0001', 'tel:+66800000001', '080-000-0001', False)),
+    '0800000002': _soc(
+        facebook=('กลุ่ม Facebook', 'https://www.facebook.com/groups/dealsure.demo.vintage', 'https://www.facebook.com/groups/dealsure.demo.vintage', False),
+        line=('mint.demo', 'https://line.me/ti/p/~mint.demo', 'mint.demo', False),
+        instagram=('@demo.mint.secondhand', 'https://www.instagram.com/demo.mint.secondhand/', '@demo.mint.secondhand', False)),
+    '0800000003': _soc(
+        facebook=('dealsure.demo.baanrimdoi', 'https://www.facebook.com/dealsure.demo.baanrimdoi', 'dealsure.demo.baanrimdoi', False),
+        line=('@demo-baanrimdoi', 'https://line.me/R/ti/p/@demo-baanrimdoi', '@demo-baanrimdoi', True),
+        youtube=('@demo-baanrimdoi', 'https://www.youtube.com/@demo-baanrimdoi', '@demo-baanrimdoi', False),
+        phone=('080-000-0003', 'tel:+66800000003', '080-000-0003', False)),
+}
+
+PH = lambda *xs: json.dumps(['/static/demo/' + x + '.svg' for x in xs])
+# (อายุวัน, ดาว, ข้อความ, รูป, สินค้า, ราคา, รูปสินค้า)
+GOLD_V4 = [
+    (2, 5, 'กล้องสภาพดีมากครับ ร้านอัดวิดีโอทดสอบชัตเตอร์ให้ดูก่อนส่ง แพ็คกันกระแทกสามชั้น ฟิล์มม้วนแรกออกมาสวยทุกรูป จ่ายผ่านดีลชัวร์อุ่นใจมาก ได้ของค่อยกดปล่อยเงิน (รีวิวตัวอย่าง)',
+     ('camera', 'box-dent'), 'กล้องฟิล์ม (ตัวอย่าง)', 2500, 'camera'),
+    (5, 2, 'ของมาถึงกล่องบุบ ฝาหลังมีรอยที่ไม่ได้แจ้งในประกาศ ทักร้านแล้วร้านเสนอคืนเงินบางส่วนให้ แต่ส่งช้ากว่ากำหนด 2 วัน อยากให้ถ่ายรูปตำหนิให้ครบกว่านี้ (รีวิวตัวอย่าง)',
+     ('box-dent',), 'วิทยุวินเทจ (ตัวอย่าง)', 1890, 'radio'),
+    (9, 4, 'นาฬิกาเดินตรงดี สายหนังเก่ากว่าในรูปนิดหน่อย แต่ร้านแถมสายใหม่ให้ ใจดีค่ะ (รีวิวตัวอย่าง)', ('watch',), 'นาฬิกาไขลาน (ตัวอย่าง)', 3200, 'watch'),
+    (14, 3, 'แผ่นเสียงเล่นได้ แต่มีเสียงซ่าแผ่นที่ 3 มากกว่าที่คิด ราคาโอเค (รีวิวตัวอย่าง)', (), 'แผ่นเสียงลูกกรุง (ตัวอย่าง)', 750, 'vinyl'),
+    (21, 5, 'ซื้อเลนส์ราคาสูงครั้งแรกแบบไม่ต้องกลัวโดนโกง ร้านส่งเลขพัสดุไวมาก เลนส์ใสไม่มีฝ้าตามที่บอกจริง ๆ (รีวิวตัวอย่าง)', ('lens',), 'เลนส์ 50mm (ตัวอย่าง)', 6500, 'lens'),
+    (40, 1, 'รอของนานมาก ร้านตอบช้า สุดท้ายได้ของแต่ไม่ตรงรุ่นที่คุยไว้ ต้องเปิดข้อพิพาท ทีมงานช่วยตัดสินให้ (รีวิวตัวอย่าง)', (), 'วิทยุวินเทจ (ตัวอย่าง)', 1890, 'radio'),
+    (60, 5, 'แผ่นเสียงปกสวยมาก เก็บรักษามาดี ฟังเพลงลูกกรุงทั้งคืนเลย (รีวิวตัวอย่าง)', ('vinyl',), 'แผ่นเสียงลูกกรุง (ตัวอย่าง)', 750, 'vinyl'),
+    (75, 3, 'กล้องใช้ได้ แต่ช่องมองภาพมีฝุ่นนิดหน่อย (รีวิวตัวอย่าง)', ('camera',), 'กล้องฟิล์ม (ตัวอย่าง)', 2500, 'camera'),
+]
+SILVER_V4 = [
+    (3, 5, 'เสื้อผ้าคอตตอนนุ่ม ไซซ์ตรงตามที่วัดให้ ซักแล้วสีไม่ตก ร้านถ่ายรูปจริงให้ดูหลายมุม (รีวิวตัวอย่าง)', ('shirt',), 'เสื้อเชิ้ตวินเทจ (ตัวอย่าง)', 350, 'shirt'),
+    (8, 2, 'กระเป๋ามีคราบที่ก้นใบ ไม่ได้บอกไว้ในโพสต์ ร้านขอโทษและลดราคาให้ (รีวิวตัวอย่าง)', ('bag',), 'กระเป๋าผ้า (ตัวอย่าง)', 590, 'bag'),
+    (30, 4, 'ของดี ส่งไว แพ็คเรียบร้อย (รีวิวตัวอย่าง)', (), 'กระเป๋าผ้า (ตัวอย่าง)', 590, 'bag'),
+]
+HOST_GOODS_V4 = [
+    (4, 5, 'กาแฟดอยคั่วเองหอมมาก เจ้าของบ้านพักส่งมาพร้อมโน้ตวิธีชง แพ็คถุงซิปมีวาล์ว (รีวิวตัวอย่าง)', ('coffee',), 'กาแฟดอยคั่วเอง 500 กรัม (ตัวอย่าง)', 420, 'coffee'),
+    (18, 3, 'กาแฟอร่อย แต่ส่งช้าไป 2 วัน (รีวิวตัวอย่าง)', (), 'กาแฟดอยคั่วเอง 500 กรัม (ตัวอย่าง)', 420, 'coffee'),
+    (45, 5, 'สั่งรอบที่สองแล้ว คั่วกลางกำลังดี (รีวิวตัวอย่าง)', ('coffee',), 'กาแฟดอยคั่วเอง 1 กก. (ตัวอย่าง)', 790, 'coffee'),
+    (70, 4, 'หอมดีครับ ถุงใหญ่คุ้ม (รีวิวตัวอย่าง)', (), 'กาแฟดอยคั่วเอง 1 กก. (ตัวอย่าง)', 790, 'coffee'),
+]
+HOST_STAY_V4 = [
+    (6, 5, 'ห้องวิวดอยสวยกว่าในรูปอีก ตื่นมาเจอทะเลหมอก เจ้าของเตรียมผ้าห่มเพิ่มให้ เช็คอินด้วยรหัส 4 หลักง่ายมาก เงินปล่อยหลังเราเข้าห้องได้จริง สบายใจ (รีวิวตัวอย่าง)',
+     ('room', 'house'), 'บ้านไม้ริมดอย ห้องวิวภูเขา (ตัวอย่าง)', 2580, 'house'),
+    (12, 2, 'ห้องโอเค แต่ทางขึ้นชันมาก รถเก๋งขึ้นลำบาก ไม่มีบอกในประกาศ ไฟทางเดินดับ 1 ดวง (รีวิวตัวอย่าง)', ('cabin',), 'กระท่อมกลางสวน สำหรับ 2 คน (ตัวอย่าง)', 1890, 'cabin'),
+    (25, 3, 'น้ำอุ่นไม่ค่อยแรง นอกนั้นตรงปก (รีวิวตัวอย่าง)', (), 'บ้านไม้ริมดอย ห้องวิวภูเขา (ตัวอย่าง)', 1290, 'house'),
+]
+
+
+def run_v4(db):
+    now = time.time()
+    ex = lambda sql, a=(): db.execute(sql, a).lastrowid
+    one = lambda sql, a=(): db.execute(sql, a).fetchone()
+    for ph, soc in SOCIALS_V4.items():
+        db.execute('UPDATE users SET socials=? WHERE phone=? AND is_demo=1', (soc, ph))
+    buyers = [r[0] for r in db.execute("SELECT id FROM users WHERE is_demo=1 AND shop_name IS NULL ORDER BY id").fetchall()]
+    if not buyers: return
+    n = [0]
+
+    def add(seller, rows, kind='goods'):
+        for i, (age, stars, txt, photos, title, price, img) in enumerate(rows):
+            n[0] += 1
+            b = buyers[(n[0] * 5) % len(buyers)]
+            t0 = now - (age + 4) * 86400
+            fee = round(max(20, price * 0.02), 2); bf = round(fee / 2, 2); sf = round(fee - bf, 2)
+            due = time.strftime('%Y-%m-%d', time.localtime(t0 + 3 * 86400))
+            did = ex("""INSERT INTO deals(code,creator_id,creator_role,seller_id,buyer_id,source,title,price,photos,delivery,due_date,fee_payer,fee,
+                    buyer_fee,seller_fee,buyer_pay,seller_get,status,on_time,created_at,accepted_at,paid_at,shipped_at,delivered_at,completed_at,
+                    release_reason,payout_amount,is_demo,kind) VALUES(?,?,'buyer',?,?,'link',?,?,?,?,?,'half',?,?,?,?,?,'completed',?,?,?,?,?,?,?,'buyer_confirm',?,1,?)""",
+                     (f'DS-REV-{n[0]:04d}', b, seller, b, title, price, PH(img), 'stay' if kind == 'stay' else 'parcel', due, fee, bf, sf,
+                      price + bf, price - sf, None if kind == 'stay' else (0 if stars <= 2 else 1), t0, t0, t0 + 600,
+                      None if kind == 'stay' else t0 + 86400, None if kind == 'stay' else t0 + 2 * 86400, t0 + 3 * 86400, price - sf, kind))
+            ex('INSERT INTO reviews(deal_id,from_id,to_id,target_role,stars,text,photos,created_at) VALUES(?,?,?,?,?,?,?,?)',
+               (did, b, seller, 'seller', stars, txt, PH(*photos) if photos else '[]', now - age * 86400))
+            ex("INSERT INTO payouts(user_id,deal_id,amount,status,created_at,paid_at) VALUES(?,?,?,'paid',?,?)",
+               (seller, did, price - sf, t0 + 3 * 86400, t0 + 3.4 * 86400))
+
+    uid = lambda ph: (one('SELECT id FROM users WHERE phone=? AND is_demo=1', (ph,)) or [None])[0]
+    gold, silver, host = uid('0800000001'), uid('0800000002'), uid('0800000003')
+    if gold: add(gold, GOLD_V4)
+    if silver: add(silver, SILVER_V4)
+    if host:
+        add(host, HOST_GOODS_V4)
+        add(host, HOST_STAY_V4, 'stay')

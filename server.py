@@ -117,7 +117,8 @@ def _migrate():
             ('deals', 'dispute_location', 'TEXT'),
             ('products', 'kind', "TEXT DEFAULT 'goods'"), ('products', 'address', 'TEXT'), ('products', 'map_url', 'TEXT'),
             ('products', 'checkin_time', 'TEXT'), ('products', 'max_guests', 'INTEGER'), ('products', 'free_cancel_days', 'INTEGER'),
-            ('products', 'host_contact', 'TEXT'))
+            ('products', 'host_contact', 'TEXT'),
+            ('users', 'socials', "TEXT DEFAULT '{}'"), ('reviews', 'photos', "TEXT DEFAULT '[]'"))
     for table, col, typ in cols:
         if col not in [r[1] for r in db.execute(f'PRAGMA table_info({table})')]:
             db.execute(f'ALTER TABLE {table} ADD COLUMN {col} {typ}')
@@ -128,9 +129,10 @@ _migrate()
 
 
 class ApiError(Exception):
-    def __init__(self, msg, status=400):
+    def __init__(self, msg, status=400, field=None):
         super().__init__(msg)
         self.status = status
+        self.field = field
 
 
 def q(sql, a=()): return db.execute(sql, a).fetchall()
@@ -271,6 +273,144 @@ def initial(name):
     return '?'
 
 
+# ---------------- ช่องทางโซเชียล (ผู้ใช้กรอกเอง · ยังไม่ตรวจสอบ เว้นแต่ทีมงานกดยืนยัน) ----------------
+SOCIAL_KEYS = ('facebook', 'line', 'instagram', 'tiktok', 'youtube', 'website', 'phone')
+SOCIAL_LABEL = {'facebook': 'Facebook', 'line': 'LINE', 'instagram': 'Instagram', 'tiktok': 'TikTok', 'youtube': 'YouTube',
+                'website': 'เว็บไซต์', 'phone': 'เบอร์โทร'}
+SOCIAL_HOSTS = {
+    'facebook': ('facebook.com', 'm.facebook.com', 'web.facebook.com', 'mbasic.facebook.com', 'fb.com', 'fb.me'),
+    'line': ('line.me', 'lin.ee', 'page.line.me'),
+    'instagram': ('instagram.com', 'instagr.am'),
+    'tiktok': ('tiktok.com', 'm.tiktok.com', 'vt.tiktok.com', 'vm.tiktok.com'),
+    'youtube': ('youtube.com', 'm.youtube.com', 'youtu.be'),
+}
+SOCIAL_HINT = {
+    'facebook': 'ใส่ชื่อผู้ใช้ เช่น padaeng.shop หรือวางลิงก์เพจ/โปรไฟล์ facebook.com/…',
+    'line': 'ใส่ LINE ID เช่น padaeng99 หรือ @padaengshop (LINE OA) หรือวางลิงก์ line.me/… / lin.ee/…',
+    'instagram': 'ใส่ชื่อผู้ใช้ เช่น @padaeng.shop หรือวางลิงก์ instagram.com/…',
+    'tiktok': 'ใส่ชื่อผู้ใช้ เช่น @padaeng.shop หรือวางลิงก์ tiktok.com/@…',
+    'youtube': 'ใส่ชื่อช่อง เช่น @padaengchannel หรือวางลิงก์ youtube.com/…',
+    'website': 'ใส่ลิงก์เว็บไซต์ เช่น https://ร้านของคุณ.com',
+    'phone': 'ใส่เบอร์โทรไทย 9–10 หลัก เช่น 081-234-5678',
+}
+_URLISH = re.compile(r'^(https?://|www\.)|^[\w-]+(\.[\w-]+)+/', re.I)
+
+
+def _host(s):
+    """แยก (host, path, query) จากลิงก์ – ถ้าไม่มี http(s):// เติมให้ · ห้ามสคีมอื่น (javascript: ฯลฯ)"""
+    if re.match(r'^[a-z][a-z0-9+.-]*:', s, re.I) and not re.match(r'^https?://', s, re.I): return None
+    u = urlparse(s if re.match(r'^https?://', s, re.I) else 'https://' + s)
+    host = (u.hostname or '').lower()
+    if host.startswith('www.'): host = host[4:]
+    if not host or ' ' in s: return None
+    return host, u.path or '', u.query or ''
+
+
+def norm_social(key, raw):
+    """ตรวจ + แปลงค่าเป็นรูปแบบมาตรฐาน → dict(h=ที่แสดง, u=ลิงก์ที่เปิด, e=ค่าในช่องแก้ไข) · ค่าว่าง = None (ลบ)"""
+    v = s_(raw, 300).strip()
+    if not v: return None
+    bad = lambda: ApiError(f'{SOCIAL_LABEL[key]}: รูปแบบไม่ถูกต้อง – {SOCIAL_HINT[key]}', 400, key)
+    if key == 'phone':
+        d = re.sub(r'[\s().-]', '', v)
+        if d.startswith('+66'): d = '0' + d[3:]
+        elif d.startswith('66') and len(d) in (11, 12): d = '0' + d[2:]
+        if not re.fullmatch(r'0\d{8,9}', d): raise bad()
+        h = f'{d[:3]}-{d[3:6]}-{d[6:]}' if len(d) == 10 else f'{d[:2]}-{d[2:5]}-{d[5:]}'
+        return dict(h=h, u='tel:+66' + d[1:], e=h)
+    if key == 'website':
+        hp = _host(v)
+        if not hp or not re.fullmatch(r'([a-z0-9\u0e00-\u0e7f-]+\.)+[a-z\u0e00-\u0e7f]{2,}', hp[0]): raise bad()
+        for k, hosts in SOCIAL_HOSTS.items():
+            if hp[0] in hosts: raise ApiError(f'เว็บไซต์: ลิงก์นี้เป็น {SOCIAL_LABEL[k]} ใส่ในช่อง {SOCIAL_LABEL[k]} แทนนะคะ', 400, key)
+        url = v if re.match(r'^https?://', v, re.I) else 'https://' + v
+        return dict(h=hp[0] + (hp[1].rstrip('/') if 1 < len(hp[1]) <= 20 else ''), u=url[:300], e=url[:300])
+    hosts = SOCIAL_HOSTS[key]
+    is_url = bool(_URLISH.match(v)) or any(v.lower().split('/')[0].removeprefix('www.') == h for h in hosts)
+    if is_url:
+        hp = _host(v)
+        if not hp or hp[0] not in hosts: raise bad()
+        host, path, query = hp
+        segs = [x for x in path.split('/') if x]
+        if not segs and not (key == 'facebook' and 'id=' in query): raise bad()
+        if key == 'facebook':
+            if segs and segs[0] == 'profile.php':
+                m = re.search(r'(?:^|&)id=(\d{5,20})', query)
+                if not m: raise bad()
+                return dict(h='โปรไฟล์ Facebook', u=f'https://www.facebook.com/profile.php?id={m.group(1)}', e=f'https://www.facebook.com/profile.php?id={m.group(1)}')
+            if segs[0] in ('groups', 'people', 'pages', 'share', 'p'):
+                url = 'https://www.facebook.com/' + '/'.join(segs)
+                return dict(h='กลุ่ม Facebook' if segs[0] == 'groups' else 'เพจ Facebook', u=url, e=url)
+            h = segs[0]
+            if not re.fullmatch(r'[A-Za-z0-9.\-]{2,80}', h): raise bad()
+            return dict(h=h, u=f'https://www.facebook.com/{h}', e=h)
+        if key == 'line':
+            if host == 'lin.ee':
+                url = 'https://lin.ee/' + '/'.join(segs); return dict(h='LINE OA', u=url, e=url)
+            m = re.fullmatch(r'/(?:R/)?ti/p/(~|@|%40)?([A-Za-z0-9._-]{3,30})/?', path)
+            if not m: raise bad()
+            if m.group(1) in ('@', '%40'):
+                h = m.group(2).lower(); return dict(h='@' + h, u=f'https://line.me/R/ti/p/@{h}', e='@' + h)
+            if m.group(1) == '~':
+                h = m.group(2).lower(); return dict(h=h, u=f'https://line.me/ti/p/~{h}', e=h)
+            url = 'https://line.me' + path; return dict(h='LINE', u=url, e=url)  # ลิงก์เชิญเพื่อนแบบสุ่ม
+        if key == 'instagram':
+            h = segs[0]
+            if not re.fullmatch(r'[A-Za-z0-9._]{1,30}', h) or h in ('p', 'reel', 'explore', 'stories'): raise bad()
+            return dict(h='@' + h.lower(), u=f'https://www.instagram.com/{h.lower()}/', e='@' + h.lower())
+        if key == 'tiktok':
+            if host in ('vt.tiktok.com', 'vm.tiktok.com'):
+                url = f'https://{host}/' + segs[0] + '/'; return dict(h='TikTok', u=url, e=url)
+            if not segs[0].startswith('@') or not re.fullmatch(r'@[A-Za-z0-9._]{2,24}', segs[0]): raise bad()
+            h = segs[0][1:].lower(); return dict(h='@' + h, u=f'https://www.tiktok.com/@{h}', e='@' + h)
+        if key == 'youtube':
+            if host == 'youtu.be': raise ApiError('YouTube: นี่คือลิงก์วิดีโอ ใส่ลิงก์หรือชื่อช่องแทน เช่น @padaengchannel', 400, key)
+            if segs[0].startswith('@') and re.fullmatch(r'@[A-Za-z0-9._-]{3,30}', segs[0]):
+                h = segs[0]; return dict(h=h, u=f'https://www.youtube.com/{h}', e=h)
+            if segs[0] in ('channel', 'c', 'user') and len(segs) > 1 and re.fullmatch(r'[A-Za-z0-9._-]{2,60}', segs[1]):
+                url = f'https://www.youtube.com/{segs[0]}/{segs[1]}'
+                return dict(h='ช่อง YouTube' if segs[0] == 'channel' else segs[1], u=url, e=url)
+            raise bad()
+    # ไม่ใช่ลิงก์ → ชื่อผู้ใช้ / ID
+    if key == 'facebook':
+        h = v.lstrip('@')
+        if not re.fullmatch(r'[A-Za-z0-9.]{5,50}', h): raise bad()
+        return dict(h=h, u=f'https://www.facebook.com/{h}', e=h)
+    if key == 'line':
+        if v.startswith('@'):
+            h = v[1:].strip().lower()
+            if not re.fullmatch(r'[a-z0-9._-]{3,20}', h): raise bad()
+            return dict(h='@' + h, u=f'https://line.me/R/ti/p/@{h}', e='@' + h)
+        h = v.lower()
+        if not re.fullmatch(r'[a-z0-9._-]{4,20}', h): raise bad()
+        return dict(h=h, u=f'https://line.me/ti/p/~{h}', e=h)
+    if key == 'instagram':
+        h = v.lstrip('@').lower()
+        if not re.fullmatch(r'[a-z0-9._]{1,30}', h) or h.startswith('.') or h.endswith('.'): raise bad()
+        return dict(h='@' + h, u=f'https://www.instagram.com/{h}/', e='@' + h)
+    if key == 'tiktok':
+        h = v.lstrip('@').lower()
+        if not re.fullmatch(r'[a-z0-9._]{2,24}', h): raise bad()
+        return dict(h='@' + h, u=f'https://www.tiktok.com/@{h}', e='@' + h)
+    if key == 'youtube':
+        h = v.lstrip('@')
+        if not re.fullmatch(r'[A-Za-z0-9._-]{3,30}', h): raise bad()
+        return dict(h='@' + h, u=f'https://www.youtube.com/@{h}', e='@' + h)
+    raise bad()
+
+
+def socials_raw(u):
+    try: d = json.loads(u['socials'] or '{}')
+    except Exception: d = {}
+    return d if isinstance(d, dict) else {}
+
+
+def socials_view(u):
+    d = socials_raw(u)
+    return [dict(key=k, label=SOCIAL_LABEL[k], h=d[k]['h'], url=d[k]['u'], edit=d[k].get('e', d[k]['h']), verified=bool(d[k].get('verified')))
+            for k in SOCIAL_KEYS if isinstance(d.get(k), dict) and d[k].get('u')]
+
+
 def user_stats(uid):
     r = q1("""SELECT
       COALESCE(SUM(seller_id=:u AND status IN ('completed','partial')),0) sales,
@@ -306,7 +446,7 @@ def public_user(u, stats=True):
     if not u: return None
     d = dict(id=u['id'], name=u['name'], shop_name=u['shop_name'] or u['name'], shop_bio=u['shop_bio'] or '',
              initial=initial(u['shop_name'] or u['name']), verified=bool(u['id_verified']), avatar=u['avatar'] or None,
-             member_since=u['created_at'], is_demo=bool(u['is_demo']))
+             member_since=u['created_at'], is_demo=bool(u['is_demo']), socials=socials_view(u))
     if stats: d['stats'] = user_stats(u['id'])
     return d
 
@@ -418,7 +558,7 @@ def deal_view(d, me):
                dispute_until=dispute_until, is_creator=bool(uid and d['creator_id'] == uid))
     out['seller'] = public_user(get_user(d['seller_id']))
     out['buyer'] = public_user(get_user(d['buyer_id']))
-    out['reviews'] = [dict(r) for r in q('SELECT from_id,to_id,target_role,stars,text,created_at FROM reviews WHERE deal_id=?', (d['id'],))]
+    out['reviews'] = [dict(dict(r), photos=jl(r['photos'])) for r in q('SELECT from_id,to_id,target_role,stars,text,photos,created_at FROM reviews WHERE deal_id=?', (d['id'],))]
     if party and d['seller_id'] and d['buyer_id']:
         out['chat_thread_id'] = deal_thread(d, 'deal')['id']
         if d['disputed_at']: out['team_thread_id'] = deal_thread(d, 'dispute')['id']
@@ -520,6 +660,22 @@ def api_me_update(req, me, b):
     return {'ok': True}
 
 
+@route('POST', '/api/me/socials')
+def api_me_socials(req, me, b):
+    """บันทึกช่องทางโซเชียล: ส่งเฉพาะช่องที่ต้องการแก้ (ค่าว่าง = ลบ) · ตรวจทุกช่องก่อนบันทึก (ผิดช่องเดียว = ไม่บันทึกเลย)
+    ถ้าแก้ค่า ป้าย "ยืนยันแล้ว" ของช่องนั้นจะหายไป (ต้องให้ทีมงานตรวจใหม่)"""
+    cur = socials_raw(me); out = dict(cur)
+    for k in SOCIAL_KEYS:
+        if k not in b: continue
+        n = norm_social(k, b.get(k))
+        if n is None: out.pop(k, None); continue
+        old = cur.get(k) if isinstance(cur.get(k), dict) else {}
+        n['verified'] = bool(old.get('verified')) and old.get('u') == n['u']
+        out[k] = n
+    ex('UPDATE users SET socials=? WHERE id=?', (json.dumps(out, ensure_ascii=False), me['id']))
+    return {'ok': True, 'socials': socials_view(get_user(me['id']))}
+
+
 @route('POST', '/api/me/verify-id')
 def api_verify_id(req, me, b):
     files = save_files([b.get('image')], allow=('image',), max_n=1)
@@ -556,17 +712,81 @@ def api_user(req, me, b, uid):
                            at=r['completed_at'] or r['refunded_at'], role='seller' if r['seller_id'] == u['id'] else 'buyer',
                            photo=(jl(r['photos']) or [None])[0]) for r in rows]
     out['reviews'] = review_list(u['id'], None, 20)
+    out['reviews_top'] = review_page(u['id'], None)
     out['product_count'] = q1('SELECT COUNT(*) n FROM products WHERE user_id=? AND active=1', (u['id'],))['n']
     return out
 
 
 def review_list(uid, role, limit):
-    sql = """SELECT r.stars,r.text,r.created_at,r.target_role,u.name from_name,u.id from_id,u.avatar from_avatar,d.title
+    sql = """SELECT r.stars,r.text,r.photos,r.created_at,r.target_role,u.name from_name,u.id from_id,u.avatar from_avatar,d.title
              FROM reviews r JOIN users u ON u.id=r.from_id JOIN deals d ON d.id=r.deal_id WHERE r.to_id=?"""
     a = [uid]
     if role: sql += ' AND r.target_role=?'; a.append(role)
     sql += ' ORDER BY r.created_at DESC LIMIT ?'; a.append(limit)
-    return [dict(r) for r in q(sql, a)]
+    return [dict(dict(r), photos=jl(r['photos'])) for r in q(sql, a)]
+
+
+# ---------------- รีวิว: สรุป + เรียง "สำคัญที่สุด" + ตัวกรอง ----------------
+REVIEW_FILTERS = ('all', '5', '4', 'low', 'photos', 'goods', 'stay')
+REVIEW_SORTS = ('important', 'recent')
+
+
+def review_score(r, t):
+    """คะแนนความสำคัญ: มีรูป · ข้อความยาว · ใหม่ · ดีลมูลค่าสูง"""
+    import math
+    ph, txt = len(r['photos']), len((r['text'] or '').strip())
+    age = max(0.0, (t - r['created_at']) / DAY)
+    return ((3 + 0.5 * (ph - 1) if ph else 0) + 3 * min(txt, 200) / 200 - (1 if not txt else 0)
+            + 3 * math.exp(-age / 90) + min(2.0, math.log10(max(r['price'] or 0, 100) / 100)))
+
+
+def review_rows(uid, role):
+    sql = """SELECT r.id,r.stars,r.text,r.photos,r.created_at,r.target_role,u.name from_name,u.id from_id,u.avatar from_avatar,
+             d.title,d.price,COALESCE(d.kind,'goods') kind,d.is_demo FROM reviews r JOIN users u ON u.id=r.from_id JOIN deals d ON d.id=r.deal_id
+             WHERE r.to_id=?""" + (' AND r.target_role=?' if role else '')
+    out = []
+    for r in q(sql, (uid, role) if role else (uid,)):
+        x = dict(r); x['photos'] = jl(r['photos']); x['is_demo'] = bool(r['is_demo']); out.append(x)
+    return out
+
+
+def review_match(r, f):
+    return (f == 'all' or (f == '5' and r['stars'] == 5) or (f == '4' and r['stars'] == 4) or (f == 'low' and r['stars'] <= 3)
+            or (f == 'photos' and bool(r['photos'])) or (f in ('goods', 'stay') and r['kind'] == f))
+
+
+def review_page(uid, role, f='all', sort='important', offset=0, limit=3):
+    """สรุป (เฉลี่ย · จำนวน · แท่งดาว · จำนวนต่อตัวกรอง) + หน้ารีวิว
+    สำคัญที่สุด = เรียงตาม review_score แล้ว "ดัน" รีวิวติชม (1–2 ดาว) ล่าสุดขึ้นใน 3 อันดับแรกเสมอ เพื่อความโปร่งใส"""
+    f = f if f in REVIEW_FILTERS else 'all'; sort = sort if sort in REVIEW_SORTS else 'important'
+    rows = review_rows(uid, role); t = now()
+    dist = {i: 0 for i in range(1, 6)}
+    for r in rows: dist[r['stars']] += 1
+    n = len(rows)
+    summary = dict(count=n, avg=round(sum(r['stars'] for r in rows) / n, 2) if n else None, dist=dist,
+                   counts={k: sum(1 for r in rows if review_match(r, k)) for k in REVIEW_FILTERS})
+    sel = [r for r in rows if review_match(r, f)]
+    for r in sel: r['score'] = round(review_score(r, t), 3); r['pinned'] = False
+    sel.sort(key=lambda r: (-r['created_at'], -r['id']))
+    if sort == 'important':
+        crit = next((r for r in sel if r['stars'] <= 2), None)   # sel เรียงใหม่สุดก่อนอยู่แล้ว
+        sel.sort(key=lambda r: (-r['score'], -r['created_at'], -r['id']))
+        if crit:
+            crit['pinned'] = True
+            i = sel.index(crit)
+            if i > 2: sel.insert(2, sel.pop(i))
+    try: offset = max(0, int(offset)); limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError): offset, limit = 0, 3
+    return dict(summary=summary, filter=f, sort=sort, total=len(sel), offset=offset, items=sel[offset:offset + limit],
+                has_more=offset + limit < len(sel))
+
+
+@route('GET', r'/api/users/(\d+)/reviews', auth=False)
+def api_user_reviews(req, me, b, uid):
+    if not get_user(int(uid)): raise ApiError('ไม่พบผู้ใช้', 404)
+    a = qs(req)
+    role = a.get('role') if a.get('role') in ('seller', 'buyer') else None
+    return review_page(int(uid), role, a.get('filter', 'all'), a.get('sort', 'important'), a.get('offset', 0), a.get('limit', 10))
 
 
 @route('GET', '/api/deals')
@@ -867,8 +1087,12 @@ def api_review(req, me, b, code):
     if not 1 <= stars <= 5: raise ApiError('กรุณาเลือกคะแนน 1–5 ดาว')
     if q1('SELECT 1 FROM reviews WHERE deal_id=? AND from_id=?', (d['id'], me['id'])): raise ApiError('คุณให้คะแนนดีลนี้ไปแล้ว')
     to = d['seller_id'] if role == 'buyer' else d['buyer_id']
-    ex('INSERT INTO reviews(deal_id,from_id,to_id,target_role,stars,text,created_at) VALUES(?,?,?,?,?,?,?)',
-       (d['id'], me['id'], to, 'seller' if role == 'buyer' else 'buyer', stars, s_(b.get('text'), 300), now()))
+    ph = b.get('photos') or []
+    if not isinstance(ph, list): raise ApiError('รูปไม่ถูกต้อง')
+    if len(ph) > 3: raise ApiError('แนบรูปรีวิวได้สูงสุด 3 รูป')
+    photos = save_files(ph, allow=('image',), max_n=3)
+    ex('INSERT INTO reviews(deal_id,from_id,to_id,target_role,stars,text,photos,created_at) VALUES(?,?,?,?,?,?,?,?)',
+       (d['id'], me['id'], to, 'seller' if role == 'buyer' else 'buyer', stars, s_(b.get('text'), 500), json.dumps(photos), now()))
     notify(to, code, f'{me["name"]} ให้คะแนนคุณ {"★" * stars} ในดีล "{d["title"]}"', 'star')
     return {'ok': True}
 
@@ -912,6 +1136,7 @@ def api_shop(req, me, b, uid):
     out = public_user(u)
     out['products'] = [product_view(p) for p in q('SELECT * FROM products WHERE user_id=? AND active=1 ORDER BY id DESC', (u['id'],))]
     out['reviews'] = review_list(u['id'], 'seller', 10)
+    out['reviews_top'] = review_page(u['id'], 'seller')
     out['levels'] = [dict(key=k, name=n, min_deals=a, min_stars=s, max_dispute=round(m * 100), limit=l) for k, n, a, s, m, l in LEVELS]
     return out
 
@@ -1276,6 +1501,18 @@ def api_admin_resolve(req, me, b, code):
     return {'ok': True}
 
 
+@route('POST', r'/api/admin/users/(\d+)/socials/verify', auth=False, admin=True)
+def api_admin_social_verify(req, me, b, uid):
+    """ทีมงานติ๊ก "ตรวจสอบแล้ว" ให้ช่องทางโซเชียลของผู้ใช้ (เช่น เทียบเพจกับบัตร/ทักทางเพจแล้ว)"""
+    u = get_user(int(uid))
+    if not u: raise ApiError('ไม่พบผู้ใช้', 404)
+    d = socials_raw(u); k = b.get('key')
+    if k not in SOCIAL_KEYS or not isinstance(d.get(k), dict): raise ApiError('ผู้ใช้ยังไม่ได้ใส่ช่องทางนี้')
+    d[k]['verified'] = bool(b.get('verified', True))
+    ex('UPDATE users SET socials=? WHERE id=?', (json.dumps(d, ensure_ascii=False), u['id']))
+    return {'ok': True, 'socials': socials_view(get_user(u['id']))}
+
+
 @route('POST', '/api/admin/payouts/run', auth=False, admin=True)
 def api_admin_payouts(req, me, b):
     rows = q("SELECT user_id, SUM(amount) s, COUNT(*) n FROM payouts WHERE status='pending' GROUP BY user_id")
@@ -1365,7 +1602,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, res)
             raise ApiError('ไม่พบ API นี้', 404)
         except ApiError as e:
-            self.send(e.status, {'error': str(e)})
+            self.send(e.status, {'error': str(e), **({'field': e.field} if e.field else {})})
         except json.JSONDecodeError:
             self.send(400, {'error': 'ข้อมูลไม่ถูกต้อง'})
         except Exception as e:
@@ -1427,11 +1664,14 @@ if __name__ == '__main__':
             seed.run(db)
             db.commit()
             print('ใส่ข้อมูลตัวอย่าง (demo) แล้ว', flush=True)
-        elif not q1("SELECT 1 FROM users WHERE phone='0800000003'"):
+        else:
             import seed
-            seed.run_stay(db)
-            db.commit()
-            print('เพิ่มที่พักตัวอย่างแล้ว', flush=True)
+            if not q1("SELECT 1 FROM users WHERE phone='0800000003'"):
+                seed.run_stay(db); db.commit()
+                print('เพิ่มที่พักตัวอย่างแล้ว', flush=True)
+            if not q1("SELECT 1 FROM deals WHERE code='DS-REV-0001'"):
+                seed.run_v4(db); db.commit()
+                print('เพิ่มรีวิวตัวอย่าง + ช่องทางโซเชียลตัวอย่างแล้ว (v4)', flush=True)
     threading.Thread(target=ticker, daemon=True).start()
     if ADMIN_PASSWORD_GENERATED:
         print(f'[admin] ไม่ได้ตั้ง ADMIN_PASSWORD – สุ่มรหัสผู้ดูแลชั่วคราว: {ADMIN_PASSWORD}', flush=True)

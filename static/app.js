@@ -59,7 +59,7 @@ async function api(path, body) {
   let r, j;
   try { r = await fetch('/api' + path, opt); } catch (e) { throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง'); }
   try { j = await r.json(); } catch (e) { j = {error: 'เซิร์ฟเวอร์ตอบกลับผิดปกติ'}; }
-  if (!r.ok) { const e = new Error(j.error || 'เกิดข้อผิดพลาด'); e.status = r.status; throw e; }
+  if (!r.ok) { const e = new Error(j.error || 'เกิดข้อผิดพลาด'); e.status = r.status; e.field = j.field; throw e; }
   return j;
 }
 function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 2600); }
@@ -741,7 +741,7 @@ function tlHtml(it, d) {
 }
 function dealReviews(d) {
   if (!d.reviews.length) return '';
-  return `<div class="card"><h3>${ic('star', 18)}รีวิวในดีลนี้</h3>${d.reviews.map(r => `<div class="rev"><div class="h"><div class="who">${r.target_role === 'seller' ? 'ผู้ซื้อรีวิวผู้ขาย' : 'ผู้ขายรีวิวผู้ซื้อ'}</div>${stars(r.stars, 12)}</div>${r.text ? `<p>${esc(r.text)}</p>` : ''}</div>`).join('')}</div>`;
+  return `<div class="card"><h3>${ic('star', 18)}รีวิวในดีลนี้</h3>${d.reviews.map(r => `<div class="rev"><div class="h"><div class="who">${r.target_role === 'seller' ? 'ผู้ซื้อรีวิวผู้ขาย' : 'ผู้ขายรีวิวผู้ซื้อ'}</div>${stars(r.stars, 12)}</div>${r.text ? `<p>${esc(r.text)}</p>` : ''}${revPhotos(r)}</div>`).join('')}</div>`;
 }
 async function refreshDeal() { const {p, a} = route(); if (p === 'd') await vDeal(a); }
 function dealAct(btn, action, body = {}) {
@@ -818,19 +818,30 @@ function starPicker(id) {
   return `<div class="starpick" id="${id}">${[1, 2, 3, 4, 5].map(n => `<button type="button" aria-label="${n} ดาว" data-n="${n}" onclick="setStars('${id}',${n})">★</button>`).join('')}</div>`;
 }
 function setStars(id, n) { S.stars = n; $$('#' + id + ' button').forEach(b => b.classList.toggle('on', +b.dataset.n <= n)); }
+/* รูปในรีวิว (ไม่บังคับ · สูงสุด 3 รูป) */
+function revPhotoField() {
+  S.rvPhotos = [];
+  return `<label class="lb mt8">แนบรูป <span class="opt">(ไม่บังคับ · สูงสุด 3 รูป)</span></label><div class="photos rvph" id="rvPh">${revPhotosHtml()}</div>`;
+}
+function revPhotosHtml() {
+  return S.rvPhotos.map((p, i) => `<div class="ph"><img src="${p}" alt="รูปรีวิว ${i + 1}"><button type="button" class="x" aria-label="ลบรูป" onclick="S.rvPhotos.splice(${i},1);$('#rvPh').innerHTML=revPhotosHtml()">✕</button></div>`).join('')
+    + (S.rvPhotos.length < 3 ? `<div class="ph add" id="rvPhAdd" onclick="addRevPh()">＋<br>เพิ่มรูป</div>` : '');
+}
+function addRevPh() { pickFiles('image/*', true, async fs => { try { for (const f of fs.slice(0, 3 - S.rvPhotos.length)) S.rvPhotos.push(await resizeImage(f)); } catch (e) { toast(e.message); } $('#rvPh').innerHTML = revPhotosHtml(); }); }
+const revBody = id => ({stars: S.stars, text: $('#' + id).value, photos: S.rvPhotos || []});
 function confirmSheet() {
   const d = S.deal; S.stars = 0;
   openSheet(`<h2>ยืนยันว่าได้รับของครบแล้ว?</h2>
     <p class="small muted">เมื่อยืนยัน เงิน ${baht(d.seller_get)} จะถูกรวมเข้ารอบโอนถัดไป (วันละครั้ง 18:00 น.) ให้ผู้ขาย และไม่สามารถยกเลิกได้</p>
     <label class="lb mt12">ให้คะแนนร้าน <span class="opt">(ไม่บังคับ)</span></label>${starPicker('cfStars')}
-    <textarea class="input mt8" id="cfText" maxlength="300" placeholder="เขียนรีวิวสั้น ๆ (ไม่บังคับ)"></textarea>
+    <textarea class="input mt8" id="cfText" maxlength="500" placeholder="เขียนรีวิวสั้น ๆ (ไม่บังคับ)"></textarea>${revPhotoField()}
     <button class="btn primary mt12" id="cfBtn" onclick="confirmSubmit(this)">${ic('check', 20)}ยืนยันรับของ</button>`);
 }
 function confirmSubmit(btn) {
   busy(btn, async () => {
     const code = S.deal.code;
     await api(`/deals/${code}/confirm`, {});
-    if (S.stars) await api(`/deals/${code}/review`, {stars: S.stars, text: $('#cfText').value});
+    if (S.stars) await api(`/deals/${code}/review`, revBody('cfText'));
     closeSheet(); toast('ยืนยันรับของแล้ว ขอบคุณค่ะ 🎉'); await refreshDeal();
   });
 }
@@ -838,13 +849,13 @@ function reviewSheet() {
   S.stars = 0; const d = S.deal;
   openSheet(`<h2>ให้คะแนน${d.my_role === 'buyer' ? 'ผู้ขาย' : 'ผู้ซื้อ'}</h2><p class="small muted">${esc(d.my_role === 'buyer' ? d.seller.shop_name : d.buyer.name)} · ${esc(d.title)}</p>
     <label class="lb mt12">คะแนน</label>${starPicker('rvStars')}
-    <textarea class="input mt8" id="rvText" maxlength="300" placeholder="เขียนรีวิวสั้น ๆ (ไม่บังคับ)"></textarea>
+    <textarea class="input mt8" id="rvText" maxlength="500" placeholder="เขียนรีวิวสั้น ๆ (ไม่บังคับ)"></textarea>${revPhotoField()}
     <button class="btn primary mt12" id="rvBtn" onclick="reviewSubmit(this)">ส่งรีวิว</button>`);
 }
 function reviewSubmit(btn) {
   busy(btn, async () => {
     if (!S.stars) throw new Error('กรุณาเลือกจำนวนดาว');
-    await api(`/deals/${S.deal.code}/review`, {stars: S.stars, text: $('#rvText').value}); closeSheet(); toast('ขอบคุณสำหรับรีวิว ✓'); await refreshDeal();
+    await api(`/deals/${S.deal.code}/review`, revBody('rvText')); closeSheet(); toast('ขอบคุณสำหรับรีวิว ✓'); await refreshDeal();
   });
 }
 function disputeSheet() {
@@ -1031,14 +1042,14 @@ function stayConfirmSheet() {
     <p class="small muted">ยืนยันเมื่อเข้าห้องได้จริงและตรงตามประกาศแล้วเท่านั้น เงิน ${baht(d.seller_get)} จะถูกรวมเข้ารอบโอนถัดไปให้เจ้าของที่พัก และยกเลิกไม่ได้</p>
     <ul class="tips mt8"><li><span class="ti-ic">✅</span><div>เข้าห้องได้แล้ว</div></li><li><span class="ti-ic">✅</span><div>ห้องและสิ่งอำนวยความสะดวกตรงกับรูปในประกาศ</div></li></ul>
     <label class="lb mt12">รีวิวที่พัก <span class="opt">(ไม่บังคับ)</span></label>${starPicker('cfStars')}
-    <textarea class="input mt8" id="cfText" maxlength="300" placeholder="เขียนรีวิวสั้น ๆ (ไม่บังคับ)"></textarea>
+    <textarea class="input mt8" id="cfText" maxlength="500" placeholder="เขียนรีวิวสั้น ๆ (ไม่บังคับ)"></textarea>${revPhotoField()}
     <button class="btn primary mt12" id="stayCfBtn" onclick="stayConfirmSubmit(this)">${ic('check', 20)}ยืนยัน เช็คอินแล้ว ที่พักตรงปก</button>`);
 }
 function stayConfirmSubmit(btn) {
   busy(btn, async () => {
     const code = S.deal.code;
     await api(`/deals/${code}/confirm`, {});
-    if (S.stars) await api(`/deals/${code}/review`, {stars: S.stars, text: $('#cfText').value});
+    if (S.stars) await api(`/deals/${code}/review`, revBody('cfText'));
     closeSheet(); toast('เช็คอินเรียบร้อย ปล่อยเงินให้เจ้าของที่พักแล้ว ขอให้พักผ่อนสนุก 🎉'); await refreshDeal();
   });
 }
@@ -1165,12 +1176,80 @@ function trustStats(s, u) {
     <div class="tstat"><div class="i" style="background:#FFF4DB;color:var(--amber)">${ic('truck', 18)}</div><div><b>${s.on_time_rate === null ? '–' : s.on_time_rate + '%'}</b><span>ส่งตรงเวลา</span></div></div>
     <div class="tstat"><div class="i" style="background:#FFEDE5;color:#C2410C">${ic('cal', 18)}</div><div><b>${since(u.member_since)}</b><span>เปิดร้านมา</span></div></div></div>`;
 }
-function reviewsCard(u, list, title = 'รีวิวจากผู้ซื้อ') {
-  const s = u.stats, tot = s.reviews || 0;
-  return `<div class="card"><h3>${title}</h3>${tot ? `<div style="display:flex;gap:14px;align-items:center;margin-bottom:6px">
-      <div style="text-align:center"><div class="prompt" style="font-size:34px;font-weight:700;color:var(--navy);line-height:1">${s.rating.toFixed(1)}</div>${stars(s.rating, 12)}<div class="small muted">${fmt(tot)} รีวิว</div></div>
-      <div class="bars" style="flex:1">${[5, 4, 3, 2, 1].map(n => `<div class="r">${n}<div class="bar"><i style="width:${(100 * (s.rating_dist[n] || 0) / tot).toFixed(1)}%"></i></div></div>`).join('')}</div></div>` : ''}
-    ${list.length ? list.map(r => `<div class="rev"><div class="h"><div class="who">${r.from_avatar ? `<span class="mini img" style="background-image:url('${esc(r.from_avatar)}')"></span>` : `<span class="mini" style="background:${r.from_id % 2 ? '#14B8A6' : '#F59E0B'}">${esc([...r.from_name][0])}</span>`}${esc(r.from_name)}</div>${stars(r.stars, 12)}</div>${r.text ? `<p>${esc(r.text)}</p>` : ''}<div class="small muted">${r.target_role === 'buyer' ? 'รีวิวในฐานะผู้ซื้อ · ' : ''}${esc(r.title)} · ${ago(r.created_at)}</div></div>`).join('') : '<div class="empty-st">ยังไม่มีรีวิว</div>'}</div>`;
+/* ---------------- รีวิว: สรุป · 3 รีวิวสำคัญ · ตัวกรอง · เรียง · ดูทั้งหมด ---------------- */
+const RVF = [['all', 'ทั้งหมด'], ['5', '5 ดาว'], ['4', '4 ดาว'], ['low', '1–3 ดาว (ติชม)'], ['photos', 'มีรูป'], ['goods', 'สินค้า'], ['stay', 'ที่พัก']];
+const RV = {};
+const revPhotos = r => (r.photos && r.photos.length) ? `<div class="rph">${r.photos.map((p, i) => `<a href="${esc(p)}" target="_blank" rel="noopener" aria-label="ดูรูปรีวิว ${i + 1}" style="background-image:url('${esc(p)}')"></a>`).join('')}</div>` : '';
+function revItem(r) {
+  const av = r.from_avatar ? `<span class="mini img" style="background-image:url('${esc(r.from_avatar)}')"></span>` : `<span class="mini" style="background:${r.from_id % 2 ? '#14B8A6' : '#F59E0B'}">${esc([...r.from_name][0])}</span>`;
+  return `<div class="rev${r.pinned ? ' pinned' : ''}" data-stars="${r.stars}"><div class="h"><div class="who">${av}${esc(r.from_name)}</div>${stars(r.stars, 12)}</div>
+    <div class="tags">${r.pinned ? `<span class="pin">${ic('warn', 12, 'color:#B7791F')}รีวิวติชมล่าสุด</span>` : ''}<span class="kt">${r.kind === 'stay' ? '🏠 ที่พัก' : '📦 สินค้า'}</span>${r.photos.length ? `<span class="kt">${ic('photo', 12)} ${r.photos.length} รูป</span>` : ''}${r.is_demo ? '<span class="demo">รีวิวตัวอย่าง</span>' : ''}</div>
+    ${r.text ? `<p>${esc(r.text)}</p>` : ''}${revPhotos(r)}
+    <div class="small muted" style="margin-top:4px">${r.target_role === 'buyer' ? 'รีวิวในฐานะผู้ซื้อ · ' : ''}${esc(r.title)} · ${baht(r.price)} · ${ago(r.created_at)}</div></div>`;
+}
+function reviewsBlock(u, page, role, title = 'รีวิวจากผู้ซื้อ') {
+  RV.st = {uid: u.id, role, title, page, items: page.items.slice(), filter: page.filter, sort: page.sort};
+  return `<div class="card" id="reviews">${reviewsInner()}</div>`;
+}
+function reviewsInner() {
+  const st = RV.st, sm = st.page.summary, tot = sm.count;
+  if (!tot) return `<h3>${ic('star', 18)}${st.title}</h3><div class="empty-st">ยังไม่มีรีวิว</div>`;
+  const cur = st.filter, curBar = {'5': 5, '4': 4}[cur];
+  const bars = [5, 4, 3, 2, 1].map(n => { const c = sm.dist[n] || 0, f = n >= 4 ? String(n) : 'low';
+    return `<button type="button" class="${(curBar === n || (cur === 'low' && n <= 3)) ? 'on' : ''}" onclick="revFilter('${f}')" aria-label="${n} ดาว ${fmt(c)} รีวิว">${n}★<span class="bar"><i style="width:${(100 * c / tot).toFixed(1)}%"></i></span><span class="n">${fmt(c)}</span></button>`; }).join('');
+  const chips = RVF.map(([k, l]) => { const c = sm.counts[k] || 0;
+    return `<button type="button" class="chip${cur === k ? ' on' : ''}" data-f="${k}" onclick="revFilter('${k}')"${c || k === 'all' ? '' : ' disabled'}>${l} <span class="c">${fmt(c)}</span></button>`; }).join('');
+  const rest = st.page.total - st.items.length;
+  return `<h3>${ic('star', 18)}${st.title} <span class="muted small" style="font-weight:400;margin-left:auto">${fmt(tot)} รีวิว</span></h3>
+    <div class="rv-sum"><div class="rv-avg"><b>${sm.avg.toFixed(1)}</b>${stars(sm.avg, 13)}<div class="small muted">${fmt(tot)} รีวิว</div></div><div class="rv-bars">${bars}</div></div>
+    <div class="rv-chips" id="rvChips" role="group" aria-label="กรองรีวิว">${chips}</div>
+    <div class="rv-tools"><div class="seg" id="rvSort"><button type="button" class="${st.sort === 'important' ? 'on' : ''}" data-v="important" onclick="revSort('important')">สำคัญที่สุด</button><button type="button" class="${st.sort === 'recent' ? 'on' : ''}" data-v="recent" onclick="revSort('recent')">ล่าสุด</button></div></div>
+    ${st.sort === 'important' ? '<div class="rv-how">เรียงจากรีวิวที่มีรูป เขียนละเอียด ล่าสุด และดีลมูลค่าสูง · รีวิวติชม (1–2 ดาว) ล่าสุดจะแสดงด้านบนเสมอ</div>' : ''}
+    <div id="rvList">${st.items.length ? st.items.map(revItem).join('') : '<div class="rv-empty">ไม่มีรีวิวในหมวดนี้</div>'}</div>
+    ${rest > 0 ? `<button class="btn ghost sm rv-more" id="rvMore" onclick="revMore(this)">${st.items.length <= 3 ? `ดูรีวิวทั้งหมด (${fmt(st.page.total)})` : `ดูเพิ่ม (อีก ${fmt(rest)} รีวิว)`}</button>` : ''}`;
+}
+async function revLoad(offset, limit) {
+  const st = RV.st;
+  const p = await api(`/users/${st.uid}/reviews?role=${st.role || ''}&filter=${st.filter}&sort=${st.sort}&offset=${offset}&limit=${limit}`);
+  st.page = p; st.items = offset ? st.items.concat(p.items) : p.items; $('#reviews').innerHTML = reviewsInner();
+}
+function revFilter(f) { const st = RV.st; if (st.filter === f && f !== 'all') f = 'all'; st.filter = f; busy(null, () => revLoad(0, 3)); }
+function revSort(v) { RV.st.sort = v; busy(null, () => revLoad(0, 3)); }
+function revMore(btn) { busy(btn, () => revLoad(RV.st.items.length, 10)); }
+
+/* ---------------- ช่องทางโซเชียล ---------------- */
+const SOC = [['facebook', 'Facebook', 'padaeng.shop หรือ facebook.com/…', 'url'], ['line', 'LINE ID / ลิงก์', 'padaeng99 หรือ @padaengshop', 'text'],
+  ['instagram', 'Instagram', '@padaeng.shop', 'text'], ['tiktok', 'TikTok', '@padaeng.shop', 'text'], ['youtube', 'YouTube', '@padaengchannel', 'text'],
+  ['website', 'เว็บไซต์', 'https://ร้านของคุณ.com', 'url'], ['phone', 'เบอร์โทรติดต่อ', '081-234-5678', 'tel']];
+const socIcon = (k, s = 15) => `<span class="si ${k}">${ic('brand-' + k, s)}</span>`;
+function socialChips(u, owner = false) {
+  const list = u.socials || [];
+  if (!list.length) return owner ? `<p class="soc-note">${ic('info', 14)}<span>ยังไม่ได้ใส่ช่องทางโซเชียล · <a href="#/me">เพิ่มในหน้าบัญชี</a></span></p>` : '';
+  const anyV = list.some(x => x.verified);
+  return `<div class="soc" id="socChips">${list.map(x => `<a class="sc" data-k="${x.key}" href="${esc(x.url)}"${x.key === 'phone' ? '' : ' target="_blank" rel="noopener nofollow ugc"'} aria-label="${esc(x.label)}: ${esc(x.h)}${x.verified ? ' (ทีมงานตรวจสอบแล้ว)' : ''}">${socIcon(x.key)}<span class="st">${esc(x.h)}</span>${x.verified ? `<span class="vf">${ic('check', 10)}ตรวจแล้ว</span>` : ''}</a>`).join('')}</div>
+    <p class="soc-note" id="socNote">${ic('info', 14)}<span>ช่องทางที่เจ้าของบัญชีกรอกเอง ${anyV ? 'ช่องที่มีป้าย “ตรวจแล้ว” ทีมงานตรวจสอบแล้ว ช่องอื่นยังไม่ได้ตรวจสอบ' : 'ยังไม่ได้ตรวจสอบ'} · คุยได้ แต่จ่ายเงินผ่านดีลชัวร์เท่านั้น</span></p>`;
+}
+function socialForm(u) {
+  const cur = Object.fromEntries((u.socials || []).map(x => [x.key, x]));
+  return `<div class="card" id="socCard"><h3>${ic('chat', 18)}ช่องทางโซเชียล / ติดต่อ</h3>
+    <p class="small muted">แสดงเป็นปุ่มบนโปรไฟล์และหน้าร้านของคุณ ให้ลูกค้ากดไปดูเพจหรือทักได้ · ใส่ชื่อผู้ใช้หรือวางลิงก์ก็ได้ ระบบจัดรูปแบบให้</p>
+    ${SOC.map(([k, l, ph, t]) => `<div class="sofield">${socIcon(k, 18)}<div class="grow"><label for="so-${k}">${l} <span class="opt">(ไม่บังคับ)</span></label>
+      <input class="input" id="so-${k}" maxlength="300" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="${t === 'tel' ? 'tel' : t === 'url' ? 'url' : 'text'}" value="${esc(cur[k] ? cur[k].edit : '')}" placeholder="${esc(ph)}" oninput="this.classList.remove('bad');$('#soe-${k}').textContent=''">
+      <div class="soerr" id="soe-${k}" role="alert"></div>${cur[k] && cur[k].verified ? `<div class="small" style="color:var(--tq-t);margin-top:3px">${ic('check', 12)} ทีมงานตรวจสอบแล้ว (ถ้าแก้ไข ต้องตรวจใหม่)</div>` : ''}</div></div>`).join('')}
+    <p class="soc-note">${ic('info', 14)}<span>ข้อมูลนี้แสดงต่อสาธารณะ และเป็นข้อมูลที่คุณกรอกเอง (ยังไม่ได้ตรวจสอบ) · เบอร์โทรนี้ไม่ใช่เบอร์ที่ใช้เข้าสู่ระบบ ใส่หรือไม่ใส่ก็ได้</span></p>
+    <button class="btn primary sm mt12" id="soBtn" onclick="saveSocials(this)">บันทึกช่องทางโซเชียล</button>
+    ${(u.socials || []).length ? `<div class="small muted mt12">ตัวอย่างที่ลูกค้าเห็น</div>${socialChips(u)}` : ''}</div>`;
+}
+function saveSocials(btn) {
+  const body = Object.fromEntries(SOC.map(([k]) => [k, $('#so-' + k).value]));
+  busy(btn, async () => {
+    try { await api('/me/socials', body); }
+    catch (e) {
+      if (e.field && $('#so-' + e.field)) { $('#so-' + e.field).classList.add('bad'); $('#soe-' + e.field).textContent = e.message; $('#so-' + e.field).focus(); $('#so-' + e.field).scrollIntoView({block: 'center'}); return; }
+      throw e;
+    }
+    toast('บันทึกช่องทางโซเชียลแล้ว ✓'); const y = window.scrollY; await vMe(); window.scrollTo(0, y);
+  });
 }
 async function vShop(id) {
   const u = await api('/shops/' + encodeURIComponent(id)); S.shop = u;
@@ -1187,6 +1266,7 @@ async function vShop(id) {
       <div class="small muted">${esc(u.shop_bio || 'เจ้าของร้าน: ' + u.name)}</div>
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${u.verified ? `<span class="badge b-green">${ic('shield', 12)}ร้านยืนยันตัวตนแล้ว</span>` : '<span class="badge b-silver">ยังไม่ยืนยันตัวตน</span>'}${s.stays_hosted ? `<span class="badge b-green">🏠 เข้าพักสำเร็จ ${fmt(s.stays_hosted)} ครั้ง</span>` : ''}
         <span class="badge b-blue"><span class="stars" style="font-size:11px">★</span>${s.rating ? s.rating.toFixed(1) + ' (' + fmt(s.reviews) + ' รีวิว)' : 'ยังไม่มีรีวิว'}</span></div>
+      ${socialChips(u, mine)}
       ${mine ? '' : `<div class="twobtn mt12"><button class="btn primary sm" id="chatShopBtn" onclick="chatShop(this,${u.id})">${ic('chat', 18)}ทักร้าน</button><button class="btn ghost sm" onclick="copyText(location.origin+'/s/${u.id}','คัดลอกลิงก์ร้านแล้ว ✓')">${ic('share', 16)}แชร์ร้าน</button></div>`}
       <div class="levels">${lv('new')}${lv('silver')}${lv('gold')}</div>
       <details class="rules"><summary>ระดับร้านคิดยังไง? · วงเงินตอนนี้ ${fmt(s.seller_limit)} ฿/ดีล</summary>
@@ -1203,7 +1283,7 @@ async function vShop(id) {
           <div class="b"><div class="t">${esc(p.title)}</div><div class="p">${baht(p.price)}${sy ? '<span class="small muted" style="font-weight:400"> /คืน</span>' : ''}</div>
           ${mine ? `<button class="btn ghost sm" onclick="delProduct(this,${p.id})">${sy ? 'ซ่อนที่พัก' : 'ซ่อนสินค้า'}</button>` : `<button class="btn primary sm" onclick="buySheet(${p.id})">${sy ? 'จองแบบปลอดภัย' : 'ซื้อแบบปลอดภัย'}</button>`}</div></div>`; }).join('')}</div>`
           : `<div class="empty-st">${mine ? 'ยังไม่มีสินค้า เพิ่มสินค้าเพื่อให้ลูกค้ากดซื้อแบบปลอดภัยได้เลย' : 'ร้านนี้ยังไม่มีสินค้า'}</div>`}</div>
-      ${reviewsCard(u, u.reviews)}
+      ${reviewsBlock(u, u.reviews_top, 'seller', u.products.some(p => p.kind === 'stay') ? 'รีวิวจากลูกค้า' : 'รีวิวจากผู้ซื้อ')}
       ${mine ? noteHtml('info', 'แชร์ลิงก์หน้าร้านในโพสต์ Facebook / LINE ได้เลย ลูกค้ากด “ซื้อแบบปลอดภัย” แล้วจ่ายผ่านระบบพักเงิน') : ''}
     </div>`;
 }
@@ -1269,6 +1349,7 @@ async function vUser(id) {
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b class="prompt" style="font-size:17px">${esc(u.name)}</b>${demoTag(u)}</div>
       ${u.shop_name !== u.name ? `<div class="small muted">ร้าน: ${esc(u.shop_name)}</div>` : ''}
       <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">${verBadge(u)}${levelBadge(s)}</div></div></div>
+      ${socialChips(u, S.me && S.me.id === u.id)}
       <div class="stats">
         <div class="stat"><b>${fmt(s.sales)}</b><span>ขายสำเร็จ</span></div>
         <div class="stat"><b>${fmt(s.buys)}</b><span>ซื้อสำเร็จ</span></div>
@@ -1281,7 +1362,7 @@ async function vUser(id) {
     <div class="card"><h3>${ic('list', 18)}ประวัติดีล <span class="muted small" style="font-weight:400;margin-left:auto">ล่าสุด ${u.history.length} ดีล</span></h3>
       ${u.history.length ? pagedList('hist', u.history, h => `<div class="hist"><div class="grow"><div class="ell"><b>${esc(h.title)}</b></div><div class="small muted">${h.role === 'seller' ? 'ขาย' : 'ซื้อ'} · ${h.at ? dShort(h.at) : ''}</div></div>
         <div style="text-align:right">${h.code ? `<a class="small" href="#/d/${h.code}">${baht(h.price)}</a>` : `<span class="small">${baht(h.price)}</span>`}<br>${stLabel(h.status, h.role)}</div></div>`) : '<div class="empty-st">ยังไม่มีดีลที่จบแล้ว</div>'}</div>
-    ${reviewsCard(u, u.reviews, 'รีวิวที่ได้รับ')}</div>`;
+    ${reviewsBlock(u, u.reviews_top, '', 'รีวิวที่ได้รับ')}</div>`;
 }
 async function vMe() {
   const [pay] = await Promise.all([api('/payouts'), loadMe()]); const u = S.me, s = u.stats;
@@ -1303,6 +1384,7 @@ async function vMe() {
       <label class="lb">ชื่อร้าน <span class="opt">(ไม่บังคับ)</span></label><input class="input" id="meShop" maxlength="60" value="${u.shop_name !== u.name ? esc(u.shop_name) : ''}" placeholder="เช่น ร้านของสะสมคุณเอ">
       <label class="lb">คำอธิบายร้าน <span class="opt">(ไม่บังคับ)</span></label><input class="input" id="meBio" maxlength="200" value="${esc(u.shop_bio)}" placeholder="เช่น ของสะสมวินเทจ · กรุงเทพฯ">
       <button class="btn primary sm mt12" onclick="saveMe(this)">บันทึก</button></div>
+    ${socialForm(u)}
     <div class="card"><h3>เชื่อมต่อบัญชี <span class="demo" style="margin-left:auto">เร็ว ๆ นี้</span></h3>
       <div class="soon"><button disabled><span class="ic" style="background:#06C755">LINE</span>LINE</button><button disabled><span class="ic" style="background:#1877F2">f</span>Facebook</button></div></div>
     <button class="btn danger" onclick="logout()">ออกจากระบบ</button>

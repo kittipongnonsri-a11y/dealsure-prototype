@@ -579,3 +579,53 @@ details.dchat .msgs{max-height:300px;overflow-y:auto;margin-top:6px}
 .addr{display:flex;gap:8px;align-items:flex-start;background:#FAFDFC;border:1px solid var(--line);border-radius:16px;padding:10px 12px;margin:8px 0;font-size:13.5px}
 .addr>svg{color:var(--tq-d);flex:none;margin-top:2px}
 .addr a{display:inline-block;margin-top:4px;font-weight:600}
+
+
+/* ===== v4: ช่องทางโซเชียล + รีวิวแบบสรุป/ตัวกรอง ===== */
+.soc{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.sc{display:inline-flex;align-items:center;gap:7px;max-width:100%;min-width:0;background:#fff;border:1.5px solid var(--line);border-radius:999px;padding:4px 12px 4px 4px;font-family:'Prompt';font-size:13px;font-weight:500;color:var(--ink);text-decoration:none;box-shadow:0 2px 8px rgba(20,90,80,.06)}
+.sc:active{transform:scale(.97)}
+.sc .si{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;color:#fff}
+.sc .st{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.sc .vf{flex:none;display:inline-flex;align-items:center;gap:2px;font-size:11px;font-weight:600;color:var(--tq-t);background:var(--tq-l);border-radius:999px;padding:1px 7px}
+.si.facebook{background:#1877F2}.si.line{background:#06C755}.si.tiktok{background:#111}.si.youtube{background:#FF0033}
+.si.instagram{background:radial-gradient(circle at 30% 107%,#FDCB52 0%,#FD5949 45%,#D6249F 65%,#285AEB 100%)}
+.si.website{background:var(--tq-d)}.si.phone{background:#0B766E}
+.soc-note{display:flex;gap:6px;align-items:flex-start;font-size:12.5px;color:var(--muted);margin-top:8px;line-height:1.45}
+.soc-note svg{flex:none;margin-top:2px;color:var(--tq-d)}
+.sofield{display:flex;align-items:center;gap:10px;margin-top:10px}
+.sofield .si{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#fff}
+.sofield .grow{min-width:0}
+.sofield label{display:block;font-family:'Prompt';font-size:13px;font-weight:600;color:#3F5A55;margin-bottom:3px}
+.sofield .input{padding:10px 12px}
+.sofield .input.bad{border-color:var(--red);background:#FFF8F8}
+.soerr{color:#B42318;font-size:12.5px;margin-top:4px;line-height:1.4}
+.rv-sum{display:flex;gap:14px;align-items:center;margin-bottom:12px}
+.rv-avg{text-align:center;flex:none;min-width:78px}
+.rv-avg b{display:block;font-family:'Prompt';font-size:34px;font-weight:700;color:var(--navy);line-height:1.05}
+.rv-bars{flex:1;display:flex;flex-direction:column;gap:3px;min-width:0}
+.rv-bars button{display:flex;align-items:center;gap:6px;background:none;border:none;padding:1px 0;font:inherit;font-size:12px;color:var(--muted);cursor:pointer;text-align:left}
+.rv-bars button .bar{flex:1;height:7px;background:#E7F3EF;border-radius:4px;overflow:hidden}
+.rv-bars button .bar i{display:block;height:100%;background:#F5A623;border-radius:4px}
+.rv-bars button .n{width:30px;text-align:right;font-variant-numeric:tabular-nums}
+.rv-bars button.on{color:var(--tq-t);font-weight:600}
+.rv-chips{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 8px;margin:0 -2px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.rv-chips::-webkit-scrollbar{display:none}
+.rv-chips .chip{flex:none;padding:7px 12px;font-size:13px}
+.rv-chips .chip .c{font-size:11.5px;color:var(--muted);font-weight:500}
+.rv-chips .chip.on .c{color:var(--tq-t)}
+.rv-chips .chip:disabled{opacity:.45;cursor:default}
+.rv-tools{display:flex;align-items:center;gap:8px;margin:4px 0 6px}
+.rv-tools .seg{flex:1;padding:3px}
+.rv-tools .seg button{padding:7px 6px;font-size:13px}
+.rv-how{font-size:12px;color:var(--muted);margin-bottom:4px;line-height:1.45}
+.rev .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.rev .pin{display:inline-flex;align-items:center;gap:4px;font-family:'Prompt';font-size:11.5px;font-weight:600;color:#8A4B00;background:#FFF4DB;border-radius:999px;padding:2px 9px}
+.rev .kt{font-size:11.5px;font-family:'Prompt';color:#2F6B62;background:#E3F4EF;border-radius:999px;padding:2px 9px;font-weight:500}
+.rev .rph{display:flex;gap:6px;margin-top:8px}
+.rev .rph a{width:72px;height:72px;border-radius:14px;background:#EAF6F2 center/cover no-repeat;flex:none;display:block}
+.rev.pinned{background:linear-gradient(180deg,#FFFBF1,#fff);border-radius:16px;padding:10px;margin:4px -10px;border-bottom:none}
+.rv-empty{padding:16px 0;text-align:center;color:var(--muted);font-size:13.5px}
+.rv-more{margin-top:12px}
+.rvph .ph img{width:100%;height:100%;object-fit:cover}
+.ph button.x{border:none;cursor:pointer;padding:0}
