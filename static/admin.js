@@ -79,6 +79,7 @@ async function load() {
   $('#view').innerHTML = `
     <div class="stats" style="margin:0 0 12px"><div class="stat" style="background:#fff"><b>${baht(r.held_total)}</b><span>เงินที่พักไว้ตอนนี้ (จำลอง)</span></div>
       <div class="stat" style="background:#fff"><b>${r.disputes.length}</b><span>ข้อพิพาทรอตัดสิน</span></div><div class="stat" style="background:#fff"><b>${r.users}</b><span>ผู้ใช้ (ไม่รวมตัวอย่าง)</span></div></div>
+    ${flagsCard(r.flags || [])}
     <div class="card"><h3><svg width="18" height="18" style="color:var(--red)!important"><use href="#warn"/></svg>ข้อพิพาทรอตัดสิน</h3>
       ${r.disputes.length ? r.disputes.map(d => `<div class="card" style="box-shadow:none;border:1.5px solid #F6C6C6" id="dp-${d.code}">
         <div class="row2"><b class="prompt grow">#${esc(d.code)} · ${esc(d.title)}</b><span class="spill sp-red">${esc(d.dispute_reason)}</span></div>
@@ -100,12 +101,16 @@ async function load() {
               <button class="csend" id="asend-${d.thread.id}" aria-label="ส่ง" onclick="sendMsg(${d.thread.id})">${ic('send', 20)}</button></div></div>
           ${d.deal_chat.length ? `<details class="dchat"><summary>ดูแชทระหว่าง${d.kind === 'stay' ? 'ผู้เข้าพัก–เจ้าของที่พัก' : 'ผู้ซื้อ–ผู้ขาย'} (${d.deal_chat.length} ข้อความ · ใช้เป็นหลักฐาน)</summary><div class="msgs">${threadMsgs(d.thread, d.deal_chat, false)}</div></details>` : `<div class="small muted mt8">${d.kind === 'stay' ? 'ผู้เข้าพัก–เจ้าของที่พัก' : 'ผู้ซื้อ–ผู้ขาย'}ยังไม่เคยแชทกันในดีลนี้</div>`}
         </div>
+        <div class="note mt8"><div class="small">ตัดสินจาก<b>หลักฐานการส่ง (เลขพัสดุ/รูปส่งมอบ) วิดีโอแพ็กของ วิดีโอแกะกล่อง และแชท</b> ·
+          ${d.dispute_reason === 'ขอยกเลิกหลังหมดเวลายกเลิกฟรี' ? `ตัดสินให้ผู้เข้าพัก: ถือว่ายกเลิกเอง หักค่าดำเนินการ ${baht(Math.max(10, d.buyer_pay * 0.02))}` : `ตัดสินให้${d.kind === 'stay' ? 'ผู้เข้าพัก' : 'ผู้ซื้อ'}: ${d.kind === 'stay' ? 'เจ้าของ' : 'ผู้ขาย'}ผิด → ได้คืนเต็ม ${baht(d.buyer_pay)} + ค่าปรับ ${baht(d.fee)} · ตัดสินให้${d.kind === 'stay' ? 'เจ้าของ' : 'ผู้ขาย'}: ${d.kind === 'stay' ? 'ผู้เข้าพัก' : 'ผู้ซื้อ'}แพ้ข้อพิพาท (บันทึกประวัติ)`} ·
+          แบ่งเงิน: ค่าธรรมเนียมคิดจากยอดที่${d.kind === 'stay' ? 'เจ้าของ' : 'ผู้ขาย'}ได้จริง (2% ขั้นต่ำ 20 ฿)</div></div>
         <label class="lb">บันทึกถึงทั้งสองฝ่าย (ไม่บังคับ)</label><input class="input" id="note-${d.code}" maxlength="300" placeholder="เช่น ตรวจคลิปแล้ว ของเสียหายจริง">
         <div class="twobtn mt12"><button class="btn primary sm" onclick="resolve('${d.code}','refund')">คืนเงิน${d.kind === 'stay' ? 'ผู้เข้าพัก' : 'ผู้ซื้อ'}ทั้งหมด</button><button class="btn ghost sm" onclick="resolve('${d.code}','release')">ปล่อยเงินให้${d.kind === 'stay' ? 'เจ้าของที่พัก' : 'ผู้ขาย'}</button></div>
         <div class="codein mt8"><input class="input" id="amt-${d.code}" inputmode="decimal" placeholder="คืน${d.kind === 'stay' ? 'ผู้เข้าพัก' : 'ผู้ซื้อ'} (บาท)" style="max-width:none;flex:1"><button class="btn ghost sm" style="flex:1" onclick="resolve('${d.code}','partial')">คืนบางส่วน</button></div>
       </div>`).join('') : '<div class="empty-st">ไม่มีข้อพิพาทค้างอยู่ 🎉</div>'}</div>
     <div class="card"><h3><svg width="18" height="18"><use href="#wallet"/></svg>รอโอนรอบถัดไป (วันละครั้ง 18:00 น.)</h3>
       ${r.payouts.length ? `<table class="atable"><tr><th>ผู้ขาย</th><th>ดีล</th><th>ยอด</th></tr>${r.payouts.map(p => `<tr><td>${esc(p.name)}</td><td>#${esc(p.code)}</td><td>${baht(p.amount)}</td></tr>`).join('')}</table>
+        <p class="small muted mt8">โอนวันละ 1 ครั้ง/ผู้ขาย รวมทุกดีล · หักค่าโอนออก 30 ฿ (ฟรีเมื่อยอดรวม ≥ 1,000 ฿) และค่าปรับค้าง</p>
         <button class="btn primary sm mt12" onclick="runPayout()">จำลองรอบโอนวันนี้ (โอนทั้งหมด)</button>` : '<div class="empty-st">ไม่มียอดรอโอน</div>'}</div>
     <div class="card"><h3><svg width="18" height="18"><use href="#list"/></svg>ดีลล่าสุด (ไม่รวมข้อมูลตัวอย่าง)</h3>
       <div style="overflow-x:auto"><table class="atable"><tr><th>รหัส</th><th>สินค้า</th><th>ผู้ขาย → ผู้ซื้อ</th><th>ยอด</th><th>สถานะ</th><th>สร้างเมื่อ</th></tr>
@@ -116,10 +121,22 @@ async function load() {
   for (const k of Object.keys(TH)) delete TH[k];
   r.disputes.forEach(d => { TH[d.thread.id] = d.thread; const b = $('#amsgs-' + d.thread.id); if (b) b.scrollTop = b.scrollHeight; });
 }
+function flagsCard(flags) {
+  const pen = flags.filter(f => f.kind === 'penalty'), lost = flags.filter(f => f.kind === 'lost_dispute');
+  const hot = flags.filter(f => f.flagged).length;
+  const row = f => `<tr class="${f.flagged ? 'flag-hot' : ''}"><td>${esc(f.name)}<br><span class="small muted">${esc(f.phone)}</span></td><td><b>${f.count}</b> ครั้ง / ${f.days} วัน${f.kind === 'penalty' ? `<br><span class="small muted">รวม ${baht(f.total)}</span>` : ''}</td>
+    <td>${f.flagged ? `<span class="spill sp-red">${f.kind === 'penalty' ? '⚠ ผิดซ้ำ ตรวจสอบร้าน' : '⚠ เสนอระงับบัญชี'}</span>` : '<span class="spill sp-gray">เฝ้าดู</span>'}</td></tr>`;
+  return `<div class="card" id="flagsCard"><h3><svg width="18" height="18" style="color:var(--red)!important"><use href="#warn"/></svg>ผู้ใช้ที่ต้องจับตา ${hot ? `<span class="spill sp-red" style="margin-left:auto">${hot} รายเกินเกณฑ์</span>` : ''}</h3>
+    ${hot ? `<div class="note err"><div><b>มีผู้ใช้เกินเกณฑ์ ${hot} ราย</b> — ผู้ขายโดนค่าปรับ ≥3 ครั้งใน 30 วัน หรือผู้ซื้อแพ้ข้อพิพาท ≥3 ครั้งใน 90 วัน</div></div>` : ''}
+    <h4 class="mt8">ผู้ขาย/เจ้าของที่พักโดนค่าปรับ (30 วัน)</h4>
+    ${pen.length ? `<table class="atable"><tr><th>ผู้ใช้</th><th>ค่าปรับ</th><th>สถานะ</th></tr>${pen.map(row).join('')}</table>` : '<div class="small muted">ไม่มี</div>'}
+    <h4 class="mt12">ผู้ซื้อแพ้ข้อพิพาท (90 วัน)</h4>
+    ${lost.length ? `<table class="atable"><tr><th>ผู้ใช้</th><th>แพ้ข้อพิพาท</th><th>สถานะ</th></tr>${lost.map(row).join('')}</table>` : '<div class="small muted">ไม่มี</div>'}</div>`;
+}
 async function resolve(code, decision) {
   const label = {refund: 'คืนเงินผู้ซื้อทั้งหมด', release: 'ปล่อยเงินให้ผู้ขาย', partial: 'คืนเงินบางส่วน'}[decision];
   if (!confirm(`ยืนยัน: ${label} สำหรับดีล #${code}?`)) return;
   try { await api(`/admin/deals/${code}/resolve`, {decision, note: $('#note-' + code).value, refund_amount: $('#amt-' + code).value}); toast('บันทึกผลการตัดสินแล้ว แจ้งทั้งสองฝ่ายแล้ว'); load(); } catch (e) { toast(e.message); }
 }
-async function runPayout() { try { const r = await api('/admin/payouts/run', {}); toast(`จำลองโอนเงินให้ผู้ขาย ${r.users} คนแล้ว`); load(); } catch (e) { toast(e.message); } }
+async function runPayout() { try { const r = await api('/admin/payouts/run', {}); toast(`จำลองโอนเงินรอบวันนี้แล้ว (${r.users} คน · หักค่าโอน/ค่าปรับแล้ว)`); load(); } catch (e) { toast(e.message); } }
 load();

@@ -667,3 +667,14 @@ details.dchat .msgs{max-height:300px;overflow-y:auto;margin-top:6px}
 .legal-links{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .footer-note .legal-mini{display:block;margin-top:4px}
 .footer-note .legal-mini a{color:var(--tq-t);font-weight:600;text-decoration:none}
+
+/* v6 ค่าธรรมเนียม/การยกเลิก/ค่าโอนออก */
+.charges{border-top:1px dashed var(--line,#E2E8F0);margin-top:6px;padding-top:4px}
+.charges .r{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:14px;gap:12px}
+.charges .r.small{font-size:12.5px;padding-top:0}
+.charges .r b{font-family:'Prompt';font-weight:600}
+.charges .r>span:first-child{flex:1 1 50%}
+.card.fee .r.small{gap:10px}
+.charges .r span:last-child,.charges .r b{text-align:right}
+.payout-rule b{color:var(--navy,#134E4A)}
+.flag-hot td{background:#FFF1F1}

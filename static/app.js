@@ -169,6 +169,22 @@ function calcFee(price, payer) {
   let b = 0, s = 0; if (payer === 'buyer') b = fee; else if (payer === 'seller') s = fee; else { b = Math.round(fee / 2 * 100) / 100; s = Math.round((fee - b) * 100) / 100; }
   return {fee, b, s, buyer: price + b, seller: price - s};
 }
+/* ค่าใช้จ่ายที่ยืนยันแล้ว (ต.ค. 2569): ค่าดำเนินการเมื่อผู้ซื้อยกเลิกเอง · ค่าโอนออกรายวัน · ค่าปรับผู้ขาย */
+const MIN_DEAL = 100, PAYOUT_FEE = 30, PAYOUT_FREE = 1000;
+const PAYOUT_RULE = 'ค่าโอนออก 30 บาท/วัน ฟรีเมื่อยอดรวม 1,000 บาทขึ้นไป';
+const cancelCharge = paid => Math.round(Math.min(paid, Math.max(10, paid * 0.02)) * 100) / 100;
+function chargeRows(price, payer, stay, f) {
+  /* ตารางค่าใช้จ่ายถ้ายกเลิก + ค่าโอนออก แสดงก่อนจ่ายเงิน/ก่อนสร้างดีล */
+  f = f || calcFee(price, payer);
+  const RB = stay ? 'ผู้เข้าพัก' : 'ผู้ซื้อ', RS = stay ? 'เจ้าของที่พัก' : 'ผู้ขาย', ch = cancelCharge(f.buyer);
+  return `<div class="charges" data-charges>
+    <div class="r"><span class="muted">${RB}ยกเลิกเอง${stay ? ' (ในช่วงยกเลิกฟรี)' : ' (ก่อนผู้ขายส่งของ)'}</span><b>ค่าดำเนินการ ${baht(ch)}</b></div>
+    <div class="r small"><span class="muted">→ ${RB}ได้เงินคืน</span><span>${baht(f.buyer - ch)} <span class="muted">(2% ของยอดที่จ่าย ขั้นต่ำ 10 ฿)</span></span></div>
+    <div class="r"><span class="muted">${RS}ยกเลิก / ${stay ? 'ที่พักไม่ตรงปก' : 'ส่งไม่ทัน / ไม่ตรงปก'}</span><b>${RB}ได้คืนเต็ม ${baht(f.buyer)}</b></div>
+    <div class="r small"><span class="muted">→ ค่าปรับ${RS} (หักจากยอดโอน)</span><span>${baht(f.fee)}</span></div>
+    ${stay ? '' : `<div class="r small"><span class="muted">หลังผู้ขายส่งของแล้ว</span><span>ยกเลิกไม่ได้ · ยืนยันรับของ หรือแจ้งปัญหา</span></div>`}
+    <div class="r small payout-rule"><span class="muted">${RS}: ค่าโอนออก</span><span><b>${PAYOUT_RULE}</b></span></div></div>`;
+}
 const noteHtml = (kind, html) => {
   const icon = kind === 'warn' || kind === 'err' ? 'warn' : 'info';
   const col = kind === 'warn' ? 'var(--amber)' : kind === 'err' ? 'var(--red)' : 'var(--tq-d)';
@@ -442,7 +458,11 @@ function vCreate() {
         <div class="r small"><span class="muted">แบ่งจ่าย</span><span id="fSplit"></span></div>
         <div class="r tot"><span>${R.buyer}จ่าย</span><b id="fBuyer"></b></div>
         <div class="r"><span class="muted">${R.seller}ได้รับ</span><b id="fSeller" style="color:var(--navy)"></b></div>
+        <div class="r small payout-rule" id="fPayout"><span class="muted">ค่าโอนออก (${R.seller}จ่าย)</span><span><b>${PAYOUT_RULE}</b></span></div>
+        <p class="small muted" style="margin:4px 0 0">รวมโอนวันละครั้งทุกดีลที่จบในวันนั้น · หักจากยอดโอนรายวัน ไม่ได้หักทุกดีล</p>
       </div>
+      <h4 class="mt12" style="margin-bottom:4px">ถ้ายกเลิกหลังจ่ายเงิน</h4>
+      <div id="fCancel"></div>
     </div>
     <div id="limitNotes"></div>
     ${noteHtml('info', 'ดีลที่มีมูลค่า <b>เกิน 3,000 บาท</b> ต้องยืนยันตัวตนก่อน · ผู้ใช้ใหม่สร้างดีลได้ <b>สูงสุด 5,000 บาท/ดีล</b>')}
@@ -477,11 +497,12 @@ function vCreate() {
     $('#fPrice').textContent = baht(p); $('#fFee').textContent = baht(f.fee);
     $('#fSplit').textContent = F.fee === 'half' ? `${R.buyer} ${baht(f.b)} · ${R.seller} ${baht(f.s)}` : F.fee === 'buyer' ? `${R.buyer}จ่ายทั้งหมด` : `${R.seller}จ่ายทั้งหมด`;
     $('#fBuyer').textContent = baht(f.buyer); $('#fSeller').textContent = baht(Math.max(0, f.seller));
+    $('#fCancel').innerHTML = p >= MIN_DEAL ? chargeRows(p, F.fee, stay, f).replace(/<div class="r small payout-rule">[\s\S]*?<\/div><\/div>$/, '</div>') : `<p class="small muted">กรอกราคาตั้งแต่ ${MIN_DEAL} บาท เพื่อดูยอดจริง</p>`;
     const st = S.me.stats, lim = F.role === 'seller' ? st.seller_limit : st.buyer_limit; let h = '';
     if (p > lim) h += noteHtml('err', F.role === 'seller' ? `วงเงินของ${st.level_name}คือ ${fmt(lim)} บาท/ดีล — ขายสำเร็จเพิ่มเพื่อเลื่อนระดับร้านและปลดล็อกวงเงิน` : `ผู้ใช้ใหม่สร้างดีลได้สูงสุด ${fmt(lim)} บาท/ดีล — ทำดีลสำเร็จครบ 5 ดีลเพื่อปลดล็อกวงเงิน`);
     else if (p > 3000 && !S.me.verified) h += noteHtml('warn', `ดีลนี้เกิน 3,000 บาท — ต้อง<b>ยืนยันตัวตน</b>ก่อน (ทดสอบ ใช้เวลาไม่ถึง 1 นาที) <button class="link" onclick="idSheet()">ยืนยันเลย →</button>`);
     else if (p > 3000) h += noteHtml('ok', 'คุณยืนยันตัวตนแล้ว สร้างดีลเกิน 3,000 บาทได้');
-    if (p > 0 && p < 50) h += noteHtml('err', 'ราคาขั้นต่ำ 50 บาท');
+    if (p > 0 && p < MIN_DEAL) h += noteHtml('err', `ยอดดีลขั้นต่ำ ${MIN_DEAL} บาท`);
     $('#limitNotes').innerHTML = h;
   };
   $$('#kindSeg button').forEach(b => b.onclick = () => { if (F.kind !== b.dataset.v) { F.kind = b.dataset.v; vCreate(); } });
@@ -515,6 +536,7 @@ function createDeal(btn) {
     if (stay && !F.address.trim()) throw new Error('กรุณากรอกที่อยู่ที่พัก');
     if (stay && !MAP_RX.test(F.map.trim())) throw new Error('กรุณาใส่ลิงก์ Google Maps ของที่พัก');
     if (!F.price) throw new Error('กรุณากรอกราคา');
+    if (+F.price < MIN_DEAL) throw new Error(`ยอดดีลขั้นต่ำ ${MIN_DEAL} บาท`);
     const body = stay ? {kind: 'stay', role: F.role, title: F.title, description: F.desc, price: F.price, photos: F.photos, fee_payer: F.fee,
         address: F.address, map_url: F.map.trim(), checkin_date: F.cin, checkin_time: F.cinTime, checkout_date: F.cout, guests: F.guests,
         host_contact: F.host, free_cancel_days: F.fcd}
@@ -590,7 +612,7 @@ async function vDeal(code) {
   else if (st === 'delivered') H = `<div class="status-hero">${ic('clock', 30, 'color:#E9A23B!important;flex:none')}<div style="flex:1"><div class="small muted">ระบบจะโอนเงินให้ผู้ขายอัตโนมัติใน</div><div class="timer" data-until="${d.auto_release_at}">${dur(d.auto_release_at - d.deal_now)}</div></div>${wait('รอยืนยัน')}</div>`;
   else if (st === 'disputed') H = hero('warn', 'var(--red)', 'ทีมงานกำลังตรวจสอบ (ภายใน 24 ชม.)', 'เงินยังพักไว้', '<span class="spill sp-red">ข้อพิพาท</span>');
   else if (st === 'completed') H = hero('check', 'var(--tq)', 'ดีลสำเร็จ · ปล่อยเงินให้ผู้ขายแล้ว', baht(d.seller_get), '<span class="spill sp-done">สำเร็จ</span>');
-  else if (st === 'refunded') H = hero('wallet', 'var(--tq)', 'คืนเงินให้ผู้ซื้อแล้ว (จำลอง)', baht(d.refund_amount), '<span class="spill sp-gray">คืนเงิน</span>');
+  else if (st === 'refunded') H = hero('wallet', 'var(--tq)', d.cancel_charge > 0 ? `คืนเงินให้ผู้ซื้อแล้ว · หักค่าดำเนินการ ${baht(d.cancel_charge)} (จำลอง)` : 'คืนเงินให้ผู้ซื้อแล้ว · เต็มจำนวนรวมค่าธรรมเนียม (จำลอง)', baht(d.refund_amount), '<span class="spill sp-gray">คืนเงิน</span>');
   else if (st === 'partial') H = hero('wallet', 'var(--tq)', 'ทีมงานตัดสินคืนเงินบางส่วน', 'คืนผู้ซื้อ ' + baht(d.refund_amount), '<span class="spill sp-gray">แบ่งเงิน</span>');
   else H = hero('info', 'var(--muted)', 'ดีลนี้ถูกยกเลิกแล้ว', 'ยกเลิก', '<span class="spill sp-gray">ยกเลิก</span>');
 
@@ -644,6 +666,9 @@ async function vDeal(code) {
   if (A('late_refund')) ac += `<div class="card">${noteHtml('err', `เลยวันที่ตกลง (${dDate(d.due_date)}) แล้ว ผู้ขายยังไม่${d.delivery === 'meet' ? 'นัดรับ' : 'ส่งของ'} คุณขอเงินคืนเต็มจำนวนได้`)}
       <button class="btn danger" onclick="lateRefund(this)">${ic('wallet', 18)}ขอเงินคืน (ส่งช้าเกินกำหนด)</button></div>`;
   if (st === 'held' && role === 'seller' && d.overdue) ac += noteHtml('err', 'เลยวันที่ตกลงส่งของแล้ว ผู้ซื้อสามารถขอเงินคืนได้ รีบส่งของหรือคุยกับผู้ซื้อนะ');
+  if (A('buyer_cancel')) ac += `<button class="btn ghost sm" id="buyerCancelBtn" onclick="cancelSheet()">ยกเลิกดีล (ก่อนผู้ขายส่งของ · ค่าดำเนินการ ${baht(d.cancel_preview ? d.cancel_preview.charge : d.buyer_cancel_charge)})</button><div style="height:12px"></div>`;
+  if (A('seller_cancel')) ac += `<button class="btn danger sm" id="sellerCancelBtn" onclick="cancelSheet()">ยกเลิกดีล (คืนผู้ซื้อเต็ม · ค่าปรับ ${baht(d.fee)})</button><div style="height:12px"></div>`;
+  if (['shipped', 'delivered'].includes(st) && role === 'buyer') ac += noteHtml('info', 'ผู้ขายส่งของแล้ว <b>ยกเลิกดีลไม่ได้</b> · ได้ของแล้วกดยืนยัน หรือถ้ามีปัญหาให้กด “แจ้งปัญหา” พร้อมคลิปแกะกล่อง/รูป ทีมงานตัดสินจากหลักฐานการส่ง วิดีโอแพ็กของ และแชท');
   if (A('confirm')) ac += `${st === 'delivered' ? `<div class="countdown" style="margin:0 0 12px">⏳ ตรวจสอบของภายใน <b>${d.delivery === 'messenger' ? '24 ชม.' : '3 วัน'}</b> — เหลืออีก <b data-until-short="${d.auto_release_at}">${durShort(d.auto_release_at - d.deal_now)}</b> หากไม่กดอะไร ระบบจะปล่อยเงินให้ผู้ขายอัตโนมัติ</div>` : ''}
       <div class="twobtn">${A('dispute') ? `<button class="btn danger" onclick="disputeSheet()">${ic('warn', 18)}แจ้งปัญหา</button>` : '<span></span>'}
       <button class="btn primary" onclick="confirmSheet()">${ic('check', 18)}ยืนยันรับของ</button></div><div style="height:12px"></div>`;
@@ -652,7 +677,8 @@ async function vDeal(code) {
   if (A('review')) ac += `<button class="btn primary" onclick="reviewSheet()">${ic('star', 20)}ให้คะแนน${role === 'buyer' ? 'ผู้ขาย' : 'ผู้ซื้อ'}</button><div style="height:12px"></div>`;
   if (role === 'seller' && d.payout) ac += `<div class="card"><h3>${ic('wallet', 18)}เงินของคุณจากดีลนี้</h3><div class="row2"><b class="prompt grow" style="font-size:22px;color:var(--tq-t)">${baht(d.payout_amount)}</b>
       ${d.payout.status === 'pending' ? '<span class="spill sp-wait">รอโอนรอบถัดไป (วันละครั้ง)</span>' : '<span class="spill sp-done">โอนแล้ว (จำลอง)</span>'}</div>
-      <p class="small muted mt8">${d.payout.status === 'pending' ? 'ระบบรวมยอดโอนวันละครั้ง ทุกวัน 18:00 น. เข้าบัญชีที่ผูกไว้ (จำลอง ไม่มีการโอนจริง)' : 'โอนเมื่อ ' + dFull(d.payout.paid_at) + ' (จำลอง)'}</p></div>`;
+      <p class="small muted mt8">${d.payout.status === 'pending' ? 'ระบบรวมยอดโอนวันละครั้ง ทุกวัน 18:00 น. เข้าบัญชีที่ผูกไว้ (จำลอง ไม่มีการโอนจริง)' : 'โอนเมื่อ ' + dFull(d.payout.paid_at) + ' (จำลอง)'} · ${PAYOUT_RULE}</p></div>`;
+  ac += moneyOutcome(d, role);
 
   let disp = '';
   if (d.disputed_at && role) {
@@ -678,6 +704,8 @@ async function vDeal(code) {
     <div class="r"><span>ราคาสินค้า</span><b>${baht(d.price)}</b></div>
     <div class="r"><span>ค่าธรรมเนียม 2% (${FEEP[d.fee_payer]})</span><b>${baht(d.fee)}</b></div>
     <div class="r"><span>ผู้ขายได้รับ</span><b>${baht(d.seller_get)}</b></div>
+    <div class="r small"><span>ค่าโอนออก (ผู้ขาย)</span><span>${PAYOUT_RULE}</span></div>
+    ${['open', 'accepted', 'held'].includes(st) ? `<div class="mt8"><b class="small">ถ้ายกเลิกหลังจ่ายเงิน</b>${chargeRows(d.price, d.fee_payer, false, {fee: d.fee, buyer: d.buyer_pay}).replace(/<div class="r small payout-rule">[\s\S]*?<\/div><\/div>$/, '</div>')}</div>` : ''}
     <div class="r" style="padding-top:10px"><span style="color:var(--ink);font-weight:600">ยอดที่ผู้ซื้อจ่าย</span><b class="prompt" style="font-size:22px;color:var(--tq-t)">${amt}</b></div></div>`;
   let protect = (['open', 'accepted'].includes(st) && (role === 'buyer' || (!role && visitorRole === 'buyer'))) ? `<div class="card">
       <h3>${ic('shield', 18)}เราคุ้มครองคุณยังไง?</h3>
@@ -726,7 +754,7 @@ function timeline(d) {
     it.push({t: 'นัดรับ – ผู้ซื้อกรอกรหัส 4 หลัก', m: d.completed_at && d.release_reason === 'meet_code' ? `${dTime(d.completed_at)} · รหัสถูกต้อง ปล่อยเงินทันที` : 'ภายใน ' + dDate(d.due_date) + ' · ผู้ซื้อตรวจของแล้วกรอกรหัสจากผู้ขาย', done: !!d.completed_at});
   }
   if (d.disputed_at) it.push({t: 'ผู้ซื้อแจ้งปัญหา', m: `${dTime(d.disputed_at)} · ${esc(d.dispute_reason)}`, done: d.status !== 'disputed', now: d.status === 'disputed'});
-  if (d.status === 'refunded') it.push({t: d.resolution === 'late' ? 'คืนเงินผู้ซื้อ (ส่งช้าเกินกำหนด)' : 'คืนเงินผู้ซื้อเต็มจำนวน', m: `${dTime(d.refunded_at)} · ${baht(d.refund_amount)} (จำลอง)`, done: true});
+  if (d.status === 'refunded') it.push({t: {late: 'คืนเงินผู้ซื้อเต็มจำนวน (ส่งช้าเกินกำหนด)', buyer_cancel: 'ผู้ซื้อยกเลิกก่อนส่งของ · คืนเงินหักค่าดำเนินการ', seller_cancel: 'ผู้ขายยกเลิก · คืนเงินผู้ซื้อเต็มจำนวน'}[d.resolution] || (d.cancel_charge > 0 ? 'คืนเงินผู้ซื้อ (หักค่าดำเนินการ)' : 'คืนเงินผู้ซื้อเต็มจำนวน'), m: `${dTime(d.refunded_at)} · ${baht(d.refund_amount)}${d.cancel_charge > 0 ? ' · ค่าดำเนินการ ' + baht(d.cancel_charge) : ''} (จำลอง)`, done: true});
   else if (d.status === 'cancelled') it.push({t: 'ยกเลิกดีล', m: dTime(d.cancelled_at), done: true});
   else {
     if (d.delivery !== 'meet' || d.status === 'partial') it.push({t: d.status === 'partial' ? 'ทีมงานตัดสินแบ่งเงิน' : 'ยืนยันรับของ', m: d.completed_at ? `${dTime(d.completed_at)} · ${{buyer_confirm: 'ผู้ซื้อกดยืนยัน', auto: 'ระบบยืนยันอัตโนมัติ (ครบกำหนด)', admin: 'ทีมงานตัดสินให้ปล่อยเงิน'}[d.release_reason] || 'คืนผู้ซื้อ ' + baht(d.refund_amount)}` : 'ผู้ซื้อกดยืนยันว่าได้รับสินค้าครบถ้วน', done: !!d.completed_at});
@@ -782,6 +810,11 @@ function paySheet() {
       <div class="small muted">บัญชีพักเงิน ดีลชัวร์ (ตัวอย่าง) · ดีล #${esc(d.code)}</div>
       <div class="demo mt8">QR จำลอง – สแกนไม่ได้</div>
     </div>
+    <div class="card fee" id="payCharges" style="box-shadow:none;margin-bottom:10px"><h4 style="margin:0 0 6px">ค่าใช้จ่ายทั้งหมด (ก่อนจ่าย)</h4>
+      <div class="r"><span class="muted">${isStay(d) ? 'ราคาที่พัก' : 'ราคาสินค้า'}</span><b>${baht(d.price)}</b></div>
+      <div class="r"><span class="muted">ค่าธรรมเนียมส่วนของคุณ (${FEEP[d.fee_payer]})</span><b>${baht(d.buyer_fee)}</b></div>
+      <div class="r tot"><span>ยอดที่จ่าย</span><b>${baht(d.buyer_pay)}</b></div>
+      <h4 class="mt8" style="margin:8px 0 4px">ถ้ายกเลิกหลังจ่าย</h4>${chargeRows(d.price, d.fee_payer, isStay(d), {fee: d.fee, buyer: d.buyer_pay})}</div>
     ${noteHtml('info', 'เงินจะเข้าบัญชีพักเงินของดีลชัวร์ ไม่ได้โอนตรงไปผู้ขาย')}
     <button class="btn primary" id="payBtn" onclick="paySubmit(this)">${ic('check', 20)}จำลองว่าจ่ายแล้ว</button>`);
 }
@@ -953,7 +986,7 @@ function stayParts(d, c) {
   else if (st === 'held') H = `<div class="status-hero">${ic('clock', 30, 'color:#E9A23B!important;flex:none')}<div style="flex:1;min-width:0"><div class="small muted">ถึงเวลาเช็คอินแล้ว · ปล่อยเงินให้เจ้าของอัตโนมัติใน</div><div class="timer" data-until="${d.release_at}">${dur(d.release_at - t)}</div></div>${wait('รอยืนยันเช็คอิน')}</div>`;
   else if (st === 'disputed') H = hero('warn', 'var(--red)', 'ทีมงานกำลังตรวจสอบ', 'เงินยังพักไว้', '<span class="spill sp-red">ข้อพิพาท</span>');
   else if (st === 'completed') H = hero('check', 'var(--tq)', 'เช็คอินสำเร็จ · ปล่อยเงินให้เจ้าของที่พักแล้ว', baht(d.seller_get), '<span class="spill sp-done">สำเร็จ</span>');
-  else if (st === 'refunded') H = hero('wallet', 'var(--tq)', {host_cancel: 'เจ้าของที่พักยกเลิก · คืนเงินผู้เข้าพักแล้ว (จำลอง)', guest_cancel: 'ยกเลิกในช่วงยกเลิกฟรี · คืนเงินแล้ว (จำลอง)'}[d.resolution] || 'คืนเงินให้ผู้เข้าพักแล้ว (จำลอง)', baht(d.refund_amount), '<span class="spill sp-gray">คืนเงิน</span>');
+  else if (st === 'refunded') H = hero('wallet', 'var(--tq)', {host_cancel: 'เจ้าของที่พักยกเลิก · คืนเงินผู้เข้าพักเต็มจำนวน (จำลอง)', guest_cancel: `ยกเลิกในช่วงยกเลิกฟรี · หักค่าดำเนินการ ${baht(d.cancel_charge)} (จำลอง)`}[d.resolution] || 'คืนเงินให้ผู้เข้าพักแล้ว (จำลอง)', baht(d.refund_amount), '<span class="spill sp-gray">คืนเงิน</span>');
   else if (st === 'partial') H = hero('wallet', 'var(--tq)', 'ทีมงานตัดสินคืนเงินบางส่วน', 'คืนผู้เข้าพัก ' + baht(d.refund_amount), '<span class="spill sp-gray">แบ่งเงิน</span>');
   else H = hero('info', 'var(--muted)', 'ดีลนี้ถูกยกเลิกแล้ว', 'ยกเลิก', '<span class="spill sp-gray">ยกเลิก</span>');
 
@@ -995,9 +1028,10 @@ function stayParts(d, c) {
   if (A('review')) ac += `<button class="btn primary" onclick="reviewSheet()">${ic('star', 20)}${role === 'buyer' ? 'รีวิวที่พัก' : 'ให้คะแนนผู้เข้าพัก'}</button><div style="height:12px"></div>`;
   if (role === 'seller' && d.payout) ac += `<div class="card"><h3>${ic('wallet', 18)}เงินของคุณจากดีลนี้</h3><div class="row2"><b class="prompt grow" style="font-size:22px;color:var(--tq-t)">${baht(d.payout_amount)}</b>
       ${d.payout.status === 'pending' ? '<span class="spill sp-wait">รอโอนรอบถัดไป (วันละครั้ง)</span>' : '<span class="spill sp-done">โอนแล้ว (จำลอง)</span>'}</div>
-      <p class="small muted mt8">${d.payout.status === 'pending' ? 'ระบบรวมยอดโอนวันละครั้ง ทุกวัน 18:00 น. (จำลอง ไม่มีการโอนจริง)' : 'โอนเมื่อ ' + dFull(d.payout.paid_at) + ' (จำลอง)'}</p></div>`;
-  if (A('guest_cancel')) ac += `<button class="btn ghost sm" id="guestCancelBtn" onclick="stayCancelSheet()">ยกเลิกการจอง${d.free_cancel_now ? ' (ยกเลิกฟรี คืนเงินเต็ม)' : ''}</button><div style="height:12px"></div>`;
-  if (A('host_cancel')) ac += `<button class="btn danger sm" id="hostCancelBtn" onclick="stayCancelSheet()">ยกเลิกการจอง (คืนเงินผู้เข้าพักเต็มจำนวน)</button><div style="height:12px"></div>`;
+      <p class="small muted mt8">${d.payout.status === 'pending' ? 'ระบบรวมยอดโอนวันละครั้ง ทุกวัน 18:00 น. (จำลอง ไม่มีการโอนจริง)' : 'โอนเมื่อ ' + dFull(d.payout.paid_at) + ' (จำลอง)'} · ${PAYOUT_RULE}</p></div>`;
+  ac += moneyOutcome(d, role);
+  if (A('guest_cancel')) ac += `<button class="btn ghost sm" id="guestCancelBtn" onclick="stayCancelSheet()">ยกเลิกการจอง${d.free_cancel_now ? ` (ในช่วงยกเลิกฟรี · ค่าดำเนินการ ${baht(d.buyer_cancel_charge)})` : ' (ส่งทีมงานตัดสิน)'}</button><div style="height:12px"></div>`;
+  if (A('host_cancel')) ac += `<button class="btn danger sm" id="hostCancelBtn" onclick="stayCancelSheet()">ยกเลิกการจอง (คืนผู้เข้าพักเต็ม · ค่าปรับ ${baht(d.fee)})</button><div style="height:12px"></div>`;
 
   const fcd = d.free_cancel_days || 0;
   const sum = `<div class="card sum" id="staySum"><h3>สรุปการจอง <span class="muted small" style="font-weight:400;margin-left:auto">#${esc(d.code)}</span></h3>
@@ -1012,6 +1046,8 @@ function stayParts(d, c) {
     <div class="r"><span>ราคาที่พัก</span><b>${baht(d.price)}</b></div>
     <div class="r"><span>ค่าธรรมเนียม 2% (${{buyer: 'ผู้เข้าพักจ่าย', seller: 'เจ้าของจ่าย', half: 'คนละครึ่ง'}[d.fee_payer]})</span><b>${baht(d.fee)}</b></div>
     <div class="r"><span>เจ้าของที่พักได้รับ</span><b>${baht(d.seller_get)}</b></div>
+    <div class="r small"><span>ค่าโอนออก (เจ้าของ)</span><span>${PAYOUT_RULE}</span></div>
+    ${['open', 'accepted', 'held'].includes(st) ? `<div class="mt8"><b class="small">ถ้ายกเลิกหลังจ่ายเงิน</b>${chargeRows(d.price, d.fee_payer, true, {fee: d.fee, buyer: d.buyer_pay}).replace(/<div class="r small payout-rule">[\s\S]*?<\/div><\/div>$/, '</div>')}</div>` : ''}
     <div class="r" style="padding-top:10px"><span style="color:var(--ink);font-weight:600">ยอดที่ผู้เข้าพักจ่าย</span><b class="prompt" style="font-size:22px;color:var(--tq-t)">${amt}</b></div></div>`;
   const guestSide = role === 'buyer' || (!role && visitorRole === 'buyer');
   const protect = guestSide && ['open', 'accepted', 'held'].includes(st) ? stayTips(d)
@@ -1024,7 +1060,7 @@ function stayParts(d, c) {
   it.push({t: 'ถึงเวลาเช็คอิน', m: dCin(cin), done: t >= cin || !!d.completed_at,
     x: st === 'held' && beforeIn ? `<div class="countdown">⏳ อีก <b data-until-short="${cin}">${durShort(cin - t)}</b> ถึงเวลาเช็คอิน</div>` : ''});
   if (d.disputed_at) it.push({t: d.dispute_reason === 'ขอยกเลิกหลังหมดเวลายกเลิกฟรี' ? 'ผู้เข้าพักขอยกเลิก (เลยช่วงยกเลิกฟรี)' : 'ผู้เข้าพักแจ้งปัญหา', m: `${dTime(d.disputed_at)} · ${esc(d.dispute_reason)}`, done: st !== 'disputed', now: st === 'disputed'});
-  if (st === 'refunded') it.push({t: {host_cancel: 'เจ้าของที่พักยกเลิก · คืนเงินเต็มจำนวน', guest_cancel: 'ยกเลิกฟรี · คืนเงินเต็มจำนวน'}[d.resolution] || 'คืนเงินผู้เข้าพักเต็มจำนวน', m: `${dTime(d.refunded_at)} · ${baht(d.refund_amount)} (จำลอง)`, done: true});
+  if (st === 'refunded') it.push({t: {host_cancel: 'เจ้าของที่พักยกเลิก · คืนเงินเต็มจำนวน', guest_cancel: 'ผู้เข้าพักยกเลิกในช่วงยกเลิกฟรี · คืนเงินหักค่าดำเนินการ'}[d.resolution] || (d.cancel_charge > 0 ? 'คืนเงินผู้เข้าพัก (หักค่าดำเนินการ)' : 'คืนเงินผู้เข้าพักเต็มจำนวน'), m: `${dTime(d.refunded_at)} · ${baht(d.refund_amount)}${d.cancel_charge > 0 ? ' · ค่าดำเนินการ ' + baht(d.cancel_charge) : ''} (จำลอง)`, done: true});
   else if (st === 'cancelled') it.push({t: 'ยกเลิกดีล', m: dTime(d.cancelled_at), done: true});
   else {
     it.push({t: st === 'partial' ? 'ทีมงานตัดสินแบ่งเงิน' : 'ผู้เข้าพักยืนยันเช็คอิน', m: d.completed_at ? `${dTime(d.completed_at)} · ${{guest_checkin: 'กด “เช็คอินแล้ว ที่พักตรงปก”', checkin_code: 'กรอกรหัสเช็คอินถูกต้อง', auto: 'ระบบปล่อยเงินอัตโนมัติ (24 ชม. หลังเวลาเช็คอิน)', admin: 'ทีมงานตัดสินให้ปล่อยเงิน'}[d.release_reason] || 'คืนผู้เข้าพัก ' + baht(d.refund_amount)}` : `กดยืนยัน หรือกรอกรหัส 4 หลัก · อัตโนมัติ ${dFull(d.release_at)}`, done: !!d.completed_at});
@@ -1099,20 +1135,54 @@ function stayProblemSubmit(btn) {
     closeSheet(); toast('ส่งเรื่องแล้ว เงินยังพักไว้ ทีมงานจะติดต่อโดยเร็ว'); await refreshDeal();
   });
 }
+function cancelBreak(cp, stay) {
+  const RB = isStay(S.deal) ? 'ผู้เข้าพัก' : 'ผู้ซื้อ';
+  if (cp.type === 'buyer_choice') return `<div class="card fee" id="cancelBreak" style="box-shadow:none;margin-bottom:10px">
+      <div class="r"><span class="muted">ยอดที่คุณจ่าย</span><b>${baht(cp.paid)}</b></div>
+      <div class="r"><span class="muted">ค่าดำเนินการ <span class="small">(2% ของยอดที่จ่าย ขั้นต่ำ 10 ฿)</span></span><b style="color:var(--red)">−${baht(cp.charge)}</b></div>
+      <div class="r tot"><span>คุณได้เงินคืน</span><b>${baht(cp.refund)}</b></div></div>`;
+  if (cp.type === 'seller_fault') return `<div class="card fee" id="cancelBreak" style="box-shadow:none;margin-bottom:10px">
+      <div class="r"><span class="muted">${RB}ได้เงินคืนเต็ม (รวมค่าธรรมเนียม)</span><b>${baht(cp.refund)}</b></div>
+      <div class="r tot"><span>ค่าปรับ${S.deal.my_role === 'seller' ? 'ของคุณ' : 'ผู้ขาย'} (หักจากยอดโอนถัดไป)</span><b style="color:var(--red)">${baht(cp.penalty)}</b></div></div>`;
+  return '';
+}
+function cancelSheet() {
+  /* ยกเลิกดีลสินค้าหลังจ่าย ก่อนผู้ขายส่งของ — แสดงยอดจริงก่อนกดยืนยัน */
+  const d = S.deal, cp = d.cancel_preview || {}, seller = d.my_role === 'seller';
+  const msg = seller ? noteHtml('warn', `ผู้ซื้อจะได้เงินคืนเต็ม ${baht(cp.refund)} รวมค่าธรรมเนียม · <b>ค่าปรับ ${baht(cp.penalty)}</b> (เท่าค่าธรรมเนียมดีลนี้) จะหักจากยอดโอนรอบถัดไปของคุณ`)
+    : cp.type === 'seller_fault' ? noteHtml('ok', 'เลยวันที่ตกลงส่งของแล้ว คุณได้เงินคืน<b>เต็มจำนวน</b> ไม่มีค่าดำเนินการ')
+    : noteHtml('info', `คุณยกเลิกเองก่อนผู้ขายส่งของ จึงมี<b>ค่าดำเนินการ ${baht(cp.charge)}</b> · หลังผู้ขายส่งของแล้วจะยกเลิกไม่ได้`);
+  openSheet(`<h2>ยกเลิกดีลนี้?</h2>${cancelBreak(cp)}${msg}
+    <button class="btn danger mt12" id="cxBtn" style="background:var(--red);color:#fff;border:none" onclick="cancelSubmit(this)">${seller ? `ยืนยันยกเลิก · คืน ${baht(cp.refund)} · ค่าปรับ ${baht(cp.penalty)}` : `ยืนยันยกเลิก · รับคืน ${baht(cp.refund)}`}</button>
+    <button class="btn ghost mt8" onclick="closeSheet()">ไม่ยกเลิก</button>`);
+}
+function cancelSubmit(btn) {
+  busy(btn, async () => {
+    const r = await api(`/deals/${S.deal.code}/cancel`, {});
+    closeSheet(); toast(r.charge ? `ยกเลิกแล้ว คืน ${baht(r.refund)} (หักค่าดำเนินการ ${baht(r.charge)})` : `ยกเลิกแล้ว คืนผู้ซื้อเต็ม ${baht(r.refund)}`); await refreshDeal();
+  });
+}
+function moneyOutcome(d, role) {
+  /* หลังยกเลิก/คืนเงิน: แสดงค่าดำเนินการ (ผู้ซื้อ) หรือค่าปรับ (ผู้ขาย) */
+  if (role === 'seller' && d.penalty > 0) return noteHtml('err', `<b>ค่าปรับ ${baht(d.penalty)}</b> (เท่าค่าธรรมเนียมดีลนี้) เพราะ${isStay(d) ? 'เจ้าของที่พัก' : 'ผู้ขาย'}เป็นฝ่ายยกเลิก/ผิดเงื่อนไข · หักจากยอดโอนรอบถัดไป <a class="link" href="#/me">ดูเงินขายของฉัน →</a>`);
+  if (role === 'buyer' && d.status === 'refunded') return noteHtml('ok', d.cancel_charge > 0 ? `คืนเงิน ${baht(d.refund_amount)} · หักค่าดำเนินการ ${baht(d.cancel_charge)} (ยกเลิกเอง)` : `คืนเงินเต็มจำนวน ${baht(d.refund_amount)} รวมค่าธรรมเนียม`);
+  if (d.status === 'partial' && d.fee_charged != null) return noteHtml('info', `คืนบางส่วน: ค่าธรรมเนียมคิดจากยอดที่${isStay(d) ? 'เจ้าของ' : 'ผู้ขาย'}ได้จริง ${baht(d.fee_charged)} (2% ขั้นต่ำ 20 ฿)`);
+  return '';
+}
 function stayCancelSheet() {
-  const d = S.deal, host = d.my_role === 'seller';
-  const body = host ? noteHtml('warn', `ยกเลิกการจองนี้ แล้ว<b>คืนเงิน ${baht(d.buyer_pay)} ให้ผู้เข้าพักเต็มจำนวน</b> (จำลอง) · ทำย้อนกลับไม่ได้`)
-    : d.free_cancel_now ? noteHtml('ok', `ยังอยู่ในช่วงยกเลิกฟรี (ถึง ${dFull(d.free_cancel_until)}) · <b>ได้เงินคืนเต็ม ${baht(d.buyer_pay)}</b> (จำลอง)`)
+  const d = S.deal, host = d.my_role === 'seller', cp = d.cancel_preview || {};
+  const body = host ? cancelBreak(cp, true) + noteHtml('warn', `ผู้เข้าพักได้เงินคืนเต็ม ${baht(d.buyer_pay)} รวมค่าธรรมเนียม · <b>ค่าปรับ ${baht(cp.penalty)}</b> (เท่าค่าธรรมเนียมดีลนี้) หักจากยอดโอนรอบถัดไปของคุณ · ทำย้อนกลับไม่ได้`)
+    : cp.type === 'buyer_choice' ? cancelBreak(cp, true) + noteHtml('ok', `ยังอยู่ในช่วงยกเลิกฟรี (ถึง ${dFull(d.free_cancel_until)}) · ไม่มีค่าปรับ มีแค่<b>ค่าดำเนินการ ${baht(cp.charge)}</b>`)
     : noteHtml('warn', `เลยช่วงยกเลิกฟรีแล้ว (ถึง ${dFull(d.free_cancel_until)}) · คำขอนี้จะส่งให้<b>ทีมงานตัดสิน</b>ว่าคืนเงินเท่าไร ระหว่างนี้เงินยังพักไว้`) +
       `<label class="lb">เหตุผลที่ขอยกเลิก</label><textarea class="input" id="scReason" maxlength="1000" placeholder="เช่น ติดธุระด่วน / เจ้าของไม่ตอบแชท"></textarea>`;
   openSheet(`<h2>ยกเลิกการจอง?</h2>${body}
-    <button class="btn danger mt12" id="scBtn" style="background:var(--red);color:#fff;border:none" onclick="stayCancelSubmit(this)">${host ? 'ยกเลิก และคืนเงินผู้เข้าพัก' : d.free_cancel_now ? 'ยกเลิกฟรี รับเงินคืน' : 'ส่งคำขอยกเลิกให้ทีมงาน'}</button>
+    <button class="btn danger mt12" id="scBtn" style="background:var(--red);color:#fff;border:none" onclick="stayCancelSubmit(this)">${host ? `ยืนยันยกเลิก · คืน ${baht(d.buyer_pay)} · ค่าปรับ ${baht(cp.penalty)}` : cp.type === 'buyer_choice' ? `ยืนยันยกเลิกในช่วงยกเลิกฟรี · รับคืน ${baht(cp.refund)}` : 'ส่งคำขอยกเลิกให้ทีมงาน'}</button>
     <button class="btn ghost mt8" onclick="closeSheet()">ไม่ยกเลิก</button>`);
 }
 function stayCancelSubmit(btn) {
   busy(btn, async () => {
     const r = await api(`/deals/${S.deal.code}/cancel`, {reason: $('#scReason') ? $('#scReason').value : ''});
-    closeSheet(); toast(r.result === 'disputed' ? 'ส่งคำขอยกเลิกให้ทีมงานแล้ว เงินยังพักไว้' : 'ยกเลิกแล้ว คืนเงินเต็มจำนวน (จำลอง)'); await refreshDeal();
+    closeSheet(); toast(r.result === 'disputed' ? 'ส่งคำขอยกเลิกให้ทีมงานแล้ว เงินยังพักไว้' : r.charge ? `ยกเลิกแล้ว คืน ${baht(r.refund)} (หักค่าดำเนินการ ${baht(r.charge)})` : 'ยกเลิกแล้ว คืนเงินผู้เข้าพักเต็มจำนวน (จำลอง)'); await refreshDeal();
   });
 }
 function stayBookSheet(p) {
@@ -1127,7 +1197,9 @@ function stayBookSheet(p) {
     <div class="card fee mt12" style="margin-bottom:0;box-shadow:none">
       <div class="r"><span class="muted" id="bkLine"></span><b id="bkPrice"></b></div>
       <div class="r"><span class="muted">ค่าธรรมเนียมส่วนของคุณ (${FEEP[p.fee_payer]})</span><b id="bkFee"></b></div>
-      <div class="r tot"><span>ยอดที่ต้องจ่าย</span><b id="bkTot"></b></div></div>
+      <div class="r tot"><span>ยอดที่ต้องจ่าย</span><b id="bkTot"></b></div>
+      <div class="r small"><span class="muted">ยกเลิกเองในช่วงยกเลิกฟรี</span><span>ค่าดำเนินการ <b id="bkCx"></b></span></div>
+      <div class="r small"><span class="muted">เจ้าของยกเลิก / ที่พักปลอม</span><span>คืนเต็มจำนวน</span></div></div>
     <p class="small muted mt8">เช็คอิน ${esc(p.checkin_time || '14:00')} น. · ยกเลิกฟรีก่อนเช็คอิน ${p.free_cancel_days || 0} วัน · เงินพักไว้จนคุณเช็คอินได้จริง</p>
     <div id="bkNotes"></div>
     <button class="btn primary mt12" id="buyBtn" onclick="stayBookSubmit(this)">${ic('shield', 20)}จอง แล้วไปจ่ายเงิน</button>`);
@@ -1136,7 +1208,7 @@ function stayBookSheet(p) {
     S.buy = {pid: p.id, cin: $('#bkIn').value, nights: n, guests: $('#bkG').value};
     const out = S.buy.cin ? new Date(Date.parse(S.buy.cin + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10) : '';
     $('#bkDates').textContent = S.buy.cin ? `🏠 ${dDate(S.buy.cin)} ${p.checkin_time || '14:00'} น. → ${dDate(out)} · ${n} คืน` : '';
-    $('#bkLine').textContent = `${baht(p.price)} × ${n} คืน`; $('#bkPrice').textContent = baht(tot); $('#bkFee').textContent = baht(f.b); $('#bkTot').textContent = baht(f.buyer);
+    $('#bkLine').textContent = `${baht(p.price)} × ${n} คืน`; $('#bkPrice').textContent = baht(tot); $('#bkFee').textContent = baht(f.b); $('#bkTot').textContent = baht(f.buyer); $('#bkCx').textContent = baht(cancelCharge(f.buyer));
     $('#bkNotes').innerHTML = tot > S.me.stats.buyer_limit ? noteHtml('err', `ผู้ใช้ใหม่จองได้สูงสุด ${fmt(S.me.stats.buyer_limit)} บาท/ดีล`) : tot > 3000 && !S.me.verified ? noteHtml('warn', 'ยอดเกิน 3,000 บาท ต้องยืนยันตัวตนก่อน <button class="link" onclick="idSheet()">ยืนยันเลย →</button>') : '';
   };
   ['#bkIn', '#bkN', '#bkG'].forEach(id => { $(id).oninput = upd; $(id).onchange = upd; });
@@ -1306,7 +1378,8 @@ function buySheet(pid) {
       <div class="r"><span class="muted">ราคาสินค้า</span><b>${baht(p.price)}</b></div>
       <div class="r"><span class="muted">ค่าธรรมเนียมส่วนของคุณ (${FEEP[p.fee_payer]})</span><b>${baht(f.b)}</b></div>
       <div class="r tot"><span>ยอดที่ต้องจ่าย</span><b>${baht(f.buyer)}</b></div></div>
-    <p class="small muted mt8">ร้านจะส่งของภายใน ${p.ship_days} วัน · ถ้าเกินกำหนด ขอเงินคืนได้</p>
+    <h4 class="mt12" style="margin:10px 0 4px">ถ้ายกเลิกหลังจ่าย</h4>${chargeRows(p.price, p.fee_payer, false, f).replace(/<div class="r small payout-rule">[\s\S]*?<\/div><\/div>$/, '</div>')}
+    <p class="small muted mt8">ร้านจะส่งของภายใน ${p.ship_days} วัน · ถ้าเกินกำหนด ขอเงินคืนเต็มได้</p>
     ${p.price > S.me.stats.buyer_limit ? noteHtml('err', `ผู้ใช้ใหม่ซื้อได้สูงสุด ${fmt(S.me.stats.buyer_limit)} บาท/ดีล — ทำดีลสำเร็จครบ 5 ดีลเพื่อปลดล็อกวงเงิน`)
       : p.price > 3000 && !S.me.verified ? noteHtml('warn', 'สินค้านี้เกิน 3,000 บาท ต้องยืนยันตัวตนก่อน <button class="link" onclick="idSheet()">ยืนยันเลย →</button>') : ''}
     <button class="btn primary mt12" id="buyBtn" onclick="buySubmit(this)">${ic('shield', 20)}สั่งซื้อ แล้วไปจ่ายเงิน</button>`);
@@ -1377,8 +1450,18 @@ async function vMe() {
       <div class="stats"><div class="stat"><b>${fmt(s.sales)}</b><span>ขายสำเร็จ</span></div><div class="stat"><b>${fmt(s.buys)}</b><span>ซื้อสำเร็จ</span></div><div class="stat"><b>${s.rating ? '★ ' + s.rating.toFixed(1) : '–'}</b><span>ดาวผู้ขาย</span></div></div>
       <div class="twobtn mt12"><button class="btn ghost sm" onclick="avatarPick()">${ic('camera', 16)}เปลี่ยนรูปโปรไฟล์</button>${u.avatar ? `<button class="btn ghost sm" onclick="avatarRemove(this)">ใช้รูปเริ่มต้น</button>` : `<a class="btn ghost sm" href="#/chats">${ic('chat', 16)}แชทของฉัน</a>`}</div>
       <div class="twobtn mt8"><a class="btn ghost sm" href="#/u/${u.id}">โปรไฟล์สาธารณะ</a><a class="btn ghost sm" href="#/shop/${u.id}">หน้าร้านของฉัน</a></div></div>
-    <div class="card"><h3>${ic('wallet', 18)}เงินขายของฉัน</h3>
-      <div class="row2"><div class="grow"><div class="small muted">รอโอนรอบถัดไป (วันละครั้ง 18:00 น.)</div><b class="prompt" style="font-size:22px;color:var(--tq-t)">${baht(pay.pending)}</b></div><span class="badge b-green">จำลอง</span></div>
+    <div class="card" id="payoutCard"><h3>${ic('wallet', 18)}เงินขายของฉัน</h3>
+      <div class="row2"><div class="grow"><div class="small muted">ยอดโอนรอบถัดไป (วันละครั้ง 18:00 น.)</div><b class="prompt" id="payNet" style="font-size:22px;color:var(--tq-t)">${baht(pay.next.net)}</b></div><span class="badge b-green">จำลอง</span></div>
+      <div class="card fee mt8" id="payBreak" style="box-shadow:none;margin-bottom:0">
+        <div class="r"><span class="muted">ยอดขายรวมที่รอโอน</span><b>${baht(pay.pending)}</b></div>
+        <div class="r"><span class="muted">ค่าโอนออก (วันละครั้ง)</span><b>${pay.pending <= 0 ? '–' : pay.next.transfer_fee ? '−' + baht(pay.next.transfer_fee) : 'ฟรี'}</b></div>
+        <div class="r"><span class="muted">ค่าปรับที่หักรอบนี้</span><b style="${pay.next.penalty ? 'color:var(--red)' : ''}">${pay.next.penalty ? '−' + baht(pay.next.penalty) : '–'}</b></div>
+        <div class="r tot"><span>คุณจะได้รับ</span><b>${baht(pay.next.net)}</b></div>
+        <p class="small mt8 payout-rule" style="margin-bottom:0"><b>${PAYOUT_RULE}</b> · รวมทุกดีลที่จบในวันนั้นเป็นการโอนครั้งเดียว ${pay.pending > 0 && pay.pending < PAYOUT_FREE ? `· ขายเพิ่มอีก ${baht(PAYOUT_FREE - pay.pending)} วันนี้ โอนฟรี` : ''}${pay.next.rollover ? '<br>ยอดยังไม่พอค่าโอน ระบบจะรวมไปโอนรอบถัดไป' : ''}</p></div>
+      ${pay.penalty_owed > 0 || pay.penalties.length ? `<div class="mt12" id="penaltyBox">${pay.penalty_owed > 0 ? noteHtml('err', `<b>ค่าปรับค้างหัก ${baht(pay.penalty_owed)}</b> — เมื่อผู้ขาย/เจ้าของที่พักยกเลิก ส่งไม่ทัน หรือทีมงานตัดสินว่าผิด ผู้ซื้อได้คืนเต็ม และคุณถูกหักค่าปรับเท่าค่าธรรมเนียมดีลนั้นจากยอดโอนถัดไป`) : ''}
+        ${pay.penalties.map(x => `<div class="hist"><a class="grow ell" href="#/d/${x.code}">ค่าปรับ · ${esc(x.title || '')}</a><div style="text-align:right"><b class="small" style="color:var(--red)">${baht(x.amount)}</b><br>${x.deducted >= x.amount ? '<span class="spill sp-done">หักแล้ว</span>' : x.deducted > 0 ? `<span class="spill sp-wait">หักแล้ว ${baht(x.deducted)}</span>` : '<span class="spill sp-wait">รอหักรอบถัดไป</span>'}</div></div>`).join('')}</div>` : ''}
+      ${pay.batches.length ? `<h4 class="mt12" style="margin-bottom:4px">รอบโอนที่ผ่านมา</h4>${pay.batches.slice(0, 5).map(x => `<div class="hist"><div class="grow"><b class="small">${dShort(x.created_at)}</b> · ${x.n} ดีล<div class="small muted">ยอดรวม ${baht(x.gross)} · ค่าโอน ${x.transfer_fee ? baht(x.transfer_fee) : 'ฟรี'}${x.penalty ? ' · ค่าปรับ ' + baht(x.penalty) : ''}</div></div><b class="small">${baht(x.net)}</b></div>`).join('')}` : ''}
+      <h4 class="mt12" style="margin-bottom:4px">รายดีล</h4>
       ${pay.items.length ? pagedList('pay', pay.items, p => `<div class="hist"><a class="grow ell" href="#/d/${p.code}">${esc(p.title)}</a><div style="text-align:right"><b class="small">${baht(p.amount)}</b><br>${p.status === 'pending' ? '<span class="spill sp-wait">รอโอนรอบถัดไป (วันละครั้ง)</span>' : '<span class="spill sp-done">โอนแล้ว (จำลอง)</span>'}</div></div>`) : '<p class="small muted mt8">ยังไม่มีเงินขาย</p>'}
       <p class="small muted mt8">ในแอปจริง: ผูกบัญชีธนาคาร / พร้อมเพย์ เพื่อรับเงิน (ยังไม่เปิดในโหมดทดลอง)</p></div>
     <div class="card"><h3>${ic('shield', 18)}ยืนยันตัวตน</h3>

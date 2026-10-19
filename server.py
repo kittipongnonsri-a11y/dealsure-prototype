@@ -26,7 +26,11 @@ HOUR, DAY = 3600, 86400
 
 # ---- business rules ----
 FEE_RATE, FEE_MIN = 0.02, 20
-MIN_PRICE, MAX_PRICE = 50, 1_000_000
+MIN_PRICE, MAX_PRICE = 100, 1_000_000   # ยอดดีลขั้นต่ำ 100 บาท (ยืนยันโดยเจ้าของ ต.ค. 2569)
+PAYOUT_FEE, PAYOUT_FREE_FROM = 30, 1000  # ค่าโอนออก 30 บาท/วัน (ผู้ขายจ่าย หักจากยอดรวมโอนรายวัน) ฟรีเมื่อยอดรวม ≥ 1,000 บาท
+CANCEL_RATE, CANCEL_MIN = 0.02, 10       # ผู้ซื้อยกเลิกเอง: ค่าดำเนินการ 2% ของยอดที่จ่าย ขั้นต่ำ 10 บาท
+PENALTY_FLAG_N, PENALTY_FLAG_DAYS = 3, 30  # ผู้ขายโดนค่าปรับ ≥3 ครั้งใน 30 วัน → แจ้งเตือนแอดมิน
+LOST_FLAG_N, LOST_FLAG_DAYS = 3, 90        # ผู้ซื้อแพ้ข้อพิพาท ≥3 ครั้งใน 90 วัน → เสนอระงับบัญชีในหน้าแอดมิน
 ID_REQUIRED_OVER = 3000
 NEW_LIMIT = 5000
 LEVELS = [  # key, name, min deals, min stars, max dispute rate, limit/deal
@@ -83,6 +87,11 @@ CREATE TABLE IF NOT EXISTS deals(
 CREATE TABLE IF NOT EXISTS payouts(
   id INTEGER PRIMARY KEY, user_id INTEGER, deal_id INTEGER, amount REAL, status TEXT DEFAULT 'pending',
   created_at REAL, paid_at REAL);
+CREATE TABLE IF NOT EXISTS records(
+  id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, deal_id INTEGER, kind TEXT NOT NULL, amount REAL DEFAULT 0,
+  deducted REAL DEFAULT 0, reason TEXT, created_at REAL);
+CREATE TABLE IF NOT EXISTS payout_batches(
+  id INTEGER PRIMARY KEY, user_id INTEGER, gross REAL, transfer_fee REAL, penalty REAL, net REAL, n INTEGER, created_at REAL);
 CREATE TABLE IF NOT EXISTS reviews(
   id INTEGER PRIMARY KEY, deal_id INTEGER, from_id INTEGER, to_id INTEGER, target_role TEXT,
   stars INTEGER, text TEXT, created_at REAL, UNIQUE(deal_id, from_id));
@@ -118,7 +127,9 @@ def _migrate():
             ('products', 'kind', "TEXT DEFAULT 'goods'"), ('products', 'address', 'TEXT'), ('products', 'map_url', 'TEXT'),
             ('products', 'checkin_time', 'TEXT'), ('products', 'max_guests', 'INTEGER'), ('products', 'free_cancel_days', 'INTEGER'),
             ('products', 'host_contact', 'TEXT'),
-            ('users', 'socials', "TEXT DEFAULT '{}'"), ('reviews', 'photos', "TEXT DEFAULT '[]'"))
+            ('users', 'socials', "TEXT DEFAULT '{}'"), ('reviews', 'photos', "TEXT DEFAULT '[]'"),
+            ('deals', 'cancel_charge', 'REAL'), ('deals', 'fee_charged', 'REAL'), ('deals', 'penalty', 'REAL'), ('deals', 'fault', 'TEXT'),
+            ('payouts', 'batch_id', 'INTEGER'))
     for table, col, typ in cols:
         if col not in [r[1] for r in db.execute(f'PRAGMA table_info({table})')]:
             db.execute(f'ALTER TABLE {table} ADD COLUMN {col} {typ}')
@@ -152,6 +163,33 @@ def calc_fee(price, payer):
     else:
         bf = money(fee / 2); sf = money(fee - bf)
     return dict(fee=fee, buyer_fee=bf, seller_fee=sf, buyer_pay=money(price + bf), seller_get=money(price - sf))
+
+
+def cancel_charge(paid):
+    """ค่าดำเนินการเมื่อผู้ซื้อยกเลิกเอง: 2% ของยอดที่จ่าย ขั้นต่ำ 10 บาท (ไม่เกินยอดที่จ่าย)"""
+    return money(min(paid, max(CANCEL_MIN, paid * CANCEL_RATE)))
+
+
+def partial_split(buyer_pay, refund):
+    """คืนบางส่วน: ค่าธรรมเนียมคิดจากยอดที่ผู้ขายได้จริงเท่านั้น (2% ขั้นต่ำ 20 บาท)"""
+    kept = money(buyer_pay - refund)
+    fee = money(min(kept, max(FEE_MIN, kept * FEE_RATE)))
+    return dict(kept=kept, fee=fee, pay=money(kept - fee))
+
+
+def payout_calc(gross, owed):
+    """รอบโอนรายวัน: ยอดรวม − ค่าโอนออก (ฟรีเมื่อ ≥ 1,000) − ค่าปรับค้าง (หักได้ไม่เกินยอดที่เหลือ)"""
+    gross = money(gross)
+    fee = 0.0 if gross >= PAYOUT_FREE_FROM else float(PAYOUT_FEE)
+    if gross <= 0 or (fee and gross <= fee):
+        return dict(gross=gross, transfer_fee=fee, penalty=0.0, net=0.0, rollover=gross > 0)
+    ded = money(min(owed, gross - fee))
+    return dict(gross=gross, transfer_fee=fee, penalty=ded, net=money(gross - fee - ded), rollover=False)
+
+
+def penalty_owed(uid):
+    r = q1("SELECT COALESCE(SUM(amount - deducted),0) s FROM records WHERE user_id=? AND kind='penalty'", (uid,))
+    return money(r['s'])
 
 
 def due_ts(due_date):
@@ -474,6 +512,40 @@ def complete(d, reason, at=None):
     notify(d['buyer_id'], d['code'], f'ดีล "{d["title"]}" สำเร็จแล้ว ' + ('ขอให้พักผ่อนให้สนุก อย่าลืมรีวิวที่พักนะ' if is_stay(d) else 'อย่าลืมให้คะแนนผู้ขายนะ'), 'check')
 
 
+def refund_seller_fault(d, t, resolution, note=None):
+    """ผู้ขาย/เจ้าของที่พักเป็นฝ่ายผิด: คืนผู้ซื้อเต็มจำนวนรวมค่าธรรมเนียม + บันทึกค่าปรับ (= ค่าธรรมเนียมของดีล) หักจากยอดโอนรอบถัดไป"""
+    pen = money(d['fee'])
+    ex("""UPDATE deals SET status='refunded', refunded_at=?, refund_amount=?, resolution=?, resolution_note=COALESCE(?, resolution_note),
+          fault='seller', penalty=?, fee_charged=0, cancel_charge=0 WHERE id=?""", (t, d['buyer_pay'], resolution, note, pen, d['id']))
+    ex("INSERT INTO records(user_id,deal_id,kind,amount,reason,created_at) VALUES(?,?,'penalty',?,?,?)", (d['seller_id'], d['id'], pen, resolution, now()))
+    notify(d['seller_id'], d['code'], f'ค่าปรับ {fmt_baht(pen)} (เท่าค่าธรรมเนียมดีล "{d["title"]}") จะหักจากยอดโอนรอบถัดไป', 'warn')
+    return pen
+
+
+def refund_buyer_choice(d, t, resolution, note=None):
+    """ผู้ซื้อ/ผู้เข้าพักยกเลิกเอง: คืนเงินหักค่าดำเนินการ 2% ของยอดที่จ่าย ขั้นต่ำ 10 บาท"""
+    ch = cancel_charge(d['buyer_pay']); back = money(d['buyer_pay'] - ch)
+    ex("""UPDATE deals SET status='refunded', refunded_at=?, refund_amount=?, resolution=?, resolution_note=COALESCE(?, resolution_note),
+          fault='buyer', cancel_charge=?, fee_charged=0, penalty=0 WHERE id=?""", (t, back, resolution, note, ch, d['id']))
+    notify(d['buyer_id'], d['code'], f'คืนเงิน {fmt_baht(back)} ให้คุณแล้ว (จำลอง) · หักค่าดำเนินการ {fmt_baht(ch)}', 'wallet')
+    return back, ch
+
+
+def cancel_preview(d, role, t):
+    """ยอดที่จะเกิดขึ้นจริงถ้ากดยกเลิกตอนนี้ (แสดงในหน้ายืนยันก่อนกด)"""
+    if not role or d['status'] != 'held': return None
+    if is_stay(d):
+        if role == 'seller': return dict(type='seller_fault', refund=d['buyer_pay'], penalty=money(d['fee']))
+        if t >= d['checkin_at']: return None
+        if t <= d['checkin_at'] - (d['free_cancel_days'] or 0) * DAY:
+            ch = cancel_charge(d['buyer_pay']); return dict(type='buyer_choice', paid=d['buyer_pay'], charge=ch, refund=money(d['buyer_pay'] - ch))
+        return dict(type='staff', paid=d['buyer_pay'])
+    if role == 'seller': return dict(type='seller_fault', refund=d['buyer_pay'], penalty=money(d['fee']))
+    if t > due_ts(d['due_date']): return dict(type='seller_fault', refund=d['buyer_pay'], penalty=money(d['fee']))
+    ch = cancel_charge(d['buyer_pay'])
+    return dict(type='buyer_choice', paid=d['buyer_pay'], charge=ch, refund=money(d['buyer_pay'] - ch))
+
+
 def process(d):
     """apply time-based rules (simulated carrier, auto-release)."""
     if not d: return d
@@ -531,9 +603,11 @@ def deal_view(d, me):
     elif st == 'held':
         if role == 'seller':
             acts.append({'parcel': 'ship_parcel', 'messenger': 'ship_messenger', 'meet': 'meet_show'}[d['delivery']])
+            acts.append('seller_cancel')
         if role == 'buyer':
             if d['delivery'] == 'meet': acts.append('meet_enter')
             if overdue: acts.append('late_refund')
+            else: acts.append('buyer_cancel')  # ก่อนผู้ขายส่งของ/ส่งมอบเท่านั้น
     elif st == 'shipped':
         if role == 'buyer': acts += ['confirm', 'dispute']
         if party: acts.append('sim_delivered')
@@ -554,6 +628,10 @@ def deal_view(d, me):
         fcu = cin - (d['free_cancel_days'] or 0) * DAY
         out.update(checkin_day_start=day_start(cin), free_cancel_until=fcu, free_cancel_now=t <= fcu,
                    release_at=d['auto_release_at'] or cin + STAY_RELEASE)
+    if party:
+        out['cancel_preview'] = cancel_preview(d, role, t)
+        out['buyer_cancel_charge'] = cancel_charge(d['buyer_pay'])
+    out['payout_rule'] = dict(fee=PAYOUT_FEE, free_from=PAYOUT_FREE_FROM)
     out.update(my_role=role, actions=acts, deal_now=t, due_ts=due_ts(d['due_date']), overdue=overdue,
                dispute_until=dispute_until, is_creator=bool(uid and d['creator_id'] == uid))
     out['seller'] = public_user(get_user(d['seller_id']))
@@ -829,7 +907,7 @@ def api_create_deal(req, me, b):
         if not title: raise ApiError('กรุณากรอกชื่อสินค้า')
     try: price = money(str(b.get('price')).replace(',', ''))
     except Exception: raise ApiError('กรุณากรอกราคาเป็นตัวเลข')
-    if price < MIN_PRICE: raise ApiError(f'ราคาขั้นต่ำ {MIN_PRICE} บาท')
+    if price < MIN_PRICE: raise ApiError(f'ยอดดีลขั้นต่ำ {MIN_PRICE} บาท กรุณากรอกราคาตั้งแต่ {MIN_PRICE} บาทขึ้นไป', field='price')
     if price > MAX_PRICE: raise ApiError('ราคาสูงเกินไป')
     if kind == 'goods':
         delivery = b.get('delivery')
@@ -1016,10 +1094,10 @@ def api_late_refund(req, me, b, code):
     if is_stay(d): raise ApiError('ดีลที่พักใช้ปุ่มยกเลิกการจองแทน')
     if d['status'] != 'held': raise ApiError('ขอคืนเงินแบบนี้ได้เฉพาะตอนผู้ขายยังไม่ส่งของ')
     if dnow(d) <= due_ts(d['due_date']): raise ApiError('ยังไม่เลยวันที่ตกลงส่งของ')
-    ex("UPDATE deals SET status='refunded', refunded_at=?, refund_amount=?, resolution='late', on_time=0 WHERE id=?",
-       (dnow(d), d['buyer_pay'], d['id']))
-    notify(d['seller_id'], code, f'ดีล "{d["title"]}" ถูกยกเลิก เพราะเลยวันที่ตกลงส่งของ · คืนเงินผู้ซื้อแล้ว', 'warn')
-    notify(d['buyer_id'], code, f'คืนเงิน {fmt_baht(d["buyer_pay"])} ให้คุณแล้ว (จำลอง)', 'wallet')
+    ex("UPDATE deals SET on_time=0 WHERE id=?", (d['id'],))
+    refund_seller_fault(d, dnow(d), 'late')
+    notify(d['seller_id'], code, f'ดีล "{d["title"]}" ถูกยกเลิก เพราะเลยวันที่ตกลงส่งของ · คืนเงินผู้ซื้อเต็มจำนวนแล้ว', 'warn')
+    notify(d['buyer_id'], code, f'คืนเงิน {fmt_baht(d["buyer_pay"])} ให้คุณเต็มจำนวน รวมค่าธรรมเนียมแล้ว (จำลอง)', 'wallet')
     return {'ok': True}
 
 
@@ -1027,7 +1105,10 @@ def api_late_refund(req, me, b, code):
 def api_cancel(req, me, b, code):
     d = act(code, me)
     if d['status'] == 'held' and is_stay(d): return stay_cancel(d, me, b)
-    if d['status'] not in ('open', 'accepted'): raise ApiError('ยกเลิกได้เฉพาะก่อนจ่ายเงิน')
+    if d['status'] == 'held': return goods_cancel(d, me, b)
+    if d['status'] in ('shipped', 'delivered', 'disputed'):
+        raise ApiError('ผู้ขายส่งของ/ส่งมอบแล้ว ยกเลิกดีลไม่ได้ · ได้ของแล้วกดยืนยันรับของ หรือถ้ามีปัญหาให้กด "แจ้งปัญหา" พร้อมหลักฐาน')
+    if d['status'] not in ('open', 'accepted'): raise ApiError('ดีลนี้จบแล้ว ยกเลิกไม่ได้')
     if me['id'] not in (d['seller_id'], d['buyer_id']): raise ApiError('คุณไม่ได้อยู่ในดีลนี้', 403)
     ex("UPDATE deals SET status='cancelled', cancelled_at=? WHERE id=?", (dnow(d), d['id']))
     other = d['buyer_id'] if me['id'] == d['seller_id'] else d['seller_id']
@@ -1035,23 +1116,34 @@ def api_cancel(req, me, b, code):
     return {'ok': True}
 
 
+def goods_cancel(d, me, b):
+    """ยกเลิกหลังจ่ายเงิน ก่อนผู้ขายส่งของ: ผู้ซื้อยกเลิกเอง = หักค่าดำเนินการ · ผู้ขายยกเลิก / เลยกำหนดส่ง = คืนเต็ม + ค่าปรับผู้ขาย"""
+    r = require_party(d, me)
+    t = dnow(d); code = d['code']
+    if r == 'seller' or t > due_ts(d['due_date']):
+        refund_seller_fault(d, t, 'seller_cancel' if r == 'seller' else 'late')
+        notify(d['buyer_id'], code, f'{"ผู้ขายยกเลิกดีล" if r == "seller" else "ยกเลิกดีลเพราะเลยวันที่ตกลงส่งของ"} "{d["title"]}" · คืนเงิน {fmt_baht(d["buyer_pay"])} ให้คุณเต็มจำนวนรวมค่าธรรมเนียม (จำลอง)', 'wallet')
+        if r == 'seller': notify(d['seller_id'], code, f'คุณยกเลิกดีล "{d["title"]}" แล้ว · คืนเงินผู้ซื้อเต็มจำนวน', 'warn')
+        return {'ok': True, 'result': 'refunded', 'fault': 'seller', 'refund': d['buyer_pay'], 'penalty': money(d['fee'])}
+    back, ch = refund_buyer_choice(d, t, 'buyer_cancel')
+    notify(d['seller_id'], code, f'ผู้ซื้อยกเลิกดีล "{d["title"]}" ก่อนส่งของ · ไม่ต้องส่งของแล้ว', 'warn')
+    return {'ok': True, 'result': 'refunded', 'fault': 'buyer', 'refund': back, 'charge': ch}
+
+
 def stay_cancel(d, me, b):
     """ยกเลิกการจองหลังจ่ายเงินแล้ว: เจ้าของยกเลิก = คืนเต็ม · ผู้เข้าพักยกเลิกในช่วงยกเลิกฟรี = คืนเต็ม · หลังจากนั้น = ส่งทีมงานตัดสิน"""
     r = require_party(d, me)
     t = dnow(d); code = d['code']
-    def refund(why):
-        ex("UPDATE deals SET status='refunded', refunded_at=?, refund_amount=?, resolution=? WHERE id=?", (t, d['buyer_pay'], why, d['id']))
-        notify(d['buyer_id'], code, f'คืนเงิน {fmt_baht(d["buyer_pay"])} ให้คุณเต็มจำนวนแล้ว (จำลอง)', 'wallet')
     if r == 'seller':
-        refund('host_cancel')
+        refund_seller_fault(d, t, 'host_cancel')
         notify(d['seller_id'], code, f'คุณยกเลิกการจอง "{d["title"]}" แล้ว · คืนเงินผู้เข้าพักเต็มจำนวน', 'warn')
-        notify(d['buyer_id'], code, f'เจ้าของที่พักยกเลิกการจอง "{d["title"]}" · ระบบคืนเงินให้คุณเต็มจำนวน', 'warn')
-        return {'ok': True, 'result': 'refunded'}
+        notify(d['buyer_id'], code, f'เจ้าของที่พักยกเลิกการจอง "{d["title"]}" · ระบบคืนเงิน {fmt_baht(d["buyer_pay"])} ให้คุณเต็มจำนวนรวมค่าธรรมเนียม', 'warn')
+        return {'ok': True, 'result': 'refunded', 'fault': 'seller', 'refund': d['buyer_pay'], 'penalty': money(d['fee'])}
     if t >= d['checkin_at']: raise ApiError('ถึงเวลาเช็คอินแล้ว ยกเลิกไม่ได้ ถ้ามีปัญหาให้กด "แจ้งปัญหา"')
     if t <= d['checkin_at'] - (d['free_cancel_days'] or 0) * DAY:
-        refund('guest_cancel')
+        back, ch = refund_buyer_choice(d, t, 'guest_cancel')
         notify(d['seller_id'], code, f'ผู้เข้าพักยกเลิกการจอง "{d["title"]}" ภายในช่วงยกเลิกฟรี · คืนเงินผู้เข้าพักแล้ว', 'warn')
-        return {'ok': True, 'result': 'refunded'}
+        return {'ok': True, 'result': 'refunded', 'fault': 'buyer', 'refund': back, 'charge': ch}
     detail = s_(b.get('reason'), 1000)
     ex("""UPDATE deals SET status='disputed', disputed_at=?, dispute_reason=?, dispute_detail=?, dispute_files='[]' WHERE id=?""",
        (t, LATE_CANCEL_REASON, detail, d['id']))
@@ -1148,7 +1240,8 @@ def api_add_product(req, me, b):
     if not title: raise ApiError('กรุณากรอกชื่อสินค้า')
     try: price = money(str(b.get('price')).replace(',', ''))
     except Exception: raise ApiError('กรุณากรอกราคาเป็นตัวเลข')
-    if price < MIN_PRICE or price > MAX_PRICE: raise ApiError(f'ราคาต้องอยู่ระหว่าง {MIN_PRICE} – {MAX_PRICE:,} บาท')
+    if price < MIN_PRICE: raise ApiError(f'ยอดดีลขั้นต่ำ {MIN_PRICE} บาท กรุณาตั้งราคาสินค้าตั้งแต่ {MIN_PRICE} บาทขึ้นไป', field='price')
+    if price > MAX_PRICE: raise ApiError(f'ราคาต้องไม่เกิน {MAX_PRICE:,} บาท')
     dl = [x for x in (b.get('deliveries') or []) if x in DELIVERIES] or ['parcel']
     fp = b.get('fee_payer') if b.get('fee_payer') in FEE_PAYERS else 'half'
     try: days = max(1, min(int(b.get('ship_days') or 3), 14))
@@ -1164,7 +1257,8 @@ def add_stay_product(me, b):
     st = stay_common(b)
     try: price = money(str(b.get('price')).replace(',', ''))
     except Exception: raise ApiError('กรุณากรอกราคาต่อคืนเป็นตัวเลข')
-    if price < MIN_PRICE or price > MAX_PRICE: raise ApiError(f'ราคาต่อคืนต้องอยู่ระหว่าง {MIN_PRICE} – {MAX_PRICE:,} บาท')
+    if price < MIN_PRICE: raise ApiError(f'ยอดดีลขั้นต่ำ {MIN_PRICE} บาท กรุณาตั้งราคาต่อคืนตั้งแต่ {MIN_PRICE} บาทขึ้นไป', field='price')
+    if price > MAX_PRICE: raise ApiError(f'ราคาต่อคืนต้องไม่เกิน {MAX_PRICE:,} บาท')
     hm = s_(b.get('checkin_time'), 5) or '14:00'
     if not re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d', hm): raise ApiError('เวลาเช็คอินไม่ถูกต้อง (เช่น 14:00)')
     try: mg = max(1, min(int(b.get('max_guests') or 2), 30))
@@ -1195,6 +1289,7 @@ def api_buy(req, me, b, pid):
     if (p['kind'] or 'goods') == 'stay': return buy_stay(me, seller, p, b)
     dl = b.get('delivery')
     if dl not in jl(p['deliveries']): raise ApiError('กรุณาเลือกวิธีส่งมอบ')
+    if p['price'] < MIN_PRICE: raise ApiError(f'ยอดดีลขั้นต่ำ {MIN_PRICE} บาท — สินค้านี้ราคาต่ำกว่าขั้นต่ำ จึงสั่งซื้อผ่านดีลชัวร์ไม่ได้')
     check_limits(me, 'buyer', p['price'])
     check_limits(seller, 'seller', p['price'])
     f = calc_fee(p['price'], p['fee_payer'])
@@ -1213,6 +1308,7 @@ def buy_stay(me, seller, p, b):
     sd = stay_dates(dict(b, checkin_time=p['checkin_time'] or '14:00'), max_guests=p['max_guests'] or 30)
     price = money(p['price'] * sd['nights'])
     if price > MAX_PRICE: raise ApiError('ยอดรวมสูงเกินไป')
+    if price < MIN_PRICE: raise ApiError(f'ยอดดีลขั้นต่ำ {MIN_PRICE} บาท — ยอดจองนี้ต่ำกว่าขั้นต่ำ')
     check_limits(me, 'buyer', price)
     check_limits(seller, 'seller', price)
     f = calc_fee(price, p['fee_payer'])
@@ -1231,8 +1327,13 @@ def buy_stay(me, seller, p, b):
 @route('GET', '/api/payouts')
 def api_payouts(req, me, b):
     rows = q("""SELECT p.*, d.code, d.title FROM payouts p JOIN deals d ON d.id=p.deal_id WHERE p.user_id=? ORDER BY p.id DESC LIMIT 50""", (me['id'],))
-    pend = sum(r['amount'] for r in rows if r['status'] == 'pending')
-    return {'items': [dict(r) for r in rows], 'pending': money(pend)}
+    pend = q1("SELECT COALESCE(SUM(amount),0) s FROM payouts WHERE user_id=? AND status='pending'", (me['id'],))['s']
+    owed = penalty_owed(me['id'])
+    pens = [dict(r) for r in q("""SELECT r.amount, r.deducted, r.reason, r.created_at, d.code, d.title FROM records r LEFT JOIN deals d ON d.id=r.deal_id
+                                  WHERE r.user_id=? AND r.kind='penalty' ORDER BY r.id DESC LIMIT 20""", (me['id'],))]
+    batches = [dict(r) for r in q('SELECT * FROM payout_batches WHERE user_id=? ORDER BY id DESC LIMIT 20', (me['id'],))]
+    return {'items': [dict(r) for r in rows], 'pending': money(pend), 'penalty_owed': owed, 'next': payout_calc(pend, owed),
+            'penalties': pens, 'batches': batches, 'rule': dict(fee=PAYOUT_FEE, free_from=PAYOUT_FREE_FROM)}
 
 
 # ---------------- chat (แชทในดีล · ทักร้าน · ทีมงานคุยในข้อพิพาท) ----------------
@@ -1450,8 +1551,19 @@ def api_admin_overview(req, me, b):
                                   WHERE p.status='pending' ORDER BY p.id""")]
     ids = [dict(r) for r in q('SELECT id,name,phone,id_doc,id_verified_at FROM users WHERE id_verified=1 AND is_demo=0 ORDER BY id_verified_at DESC LIMIT 30')]
     held = q1("SELECT COALESCE(SUM(buyer_pay),0) s FROM deals WHERE status IN ('held','shipped','delivered','disputed')")['s']
-    return {'disputes': disputes, 'recent': recent, 'payouts': pays, 'ids': ids, 'held_total': held,
+    return {'disputes': disputes, 'recent': recent, 'payouts': pays, 'ids': ids, 'held_total': held, 'flags': admin_flags(),
             'users': q1('SELECT COUNT(*) n FROM users WHERE is_demo=0')['n']}
+
+
+def admin_flags():
+    """ผู้ขายโดนค่าปรับบ่อย (≥3 ใน 30 วัน) · ผู้ซื้อแพ้ข้อพิพาทบ่อย (≥3 ใน 90 วัน → เสนอระงับบัญชี)"""
+    t = now(); out = []
+    for kind, n, days in (('penalty', PENALTY_FLAG_N, PENALTY_FLAG_DAYS), ('lost_dispute', LOST_FLAG_N, LOST_FLAG_DAYS)):
+        for r in q("""SELECT r.user_id, u.name, u.phone, COUNT(*) n, COALESCE(SUM(r.amount),0) total FROM records r JOIN users u ON u.id=r.user_id
+                      WHERE r.kind=? AND r.created_at>=? GROUP BY r.user_id ORDER BY n DESC""", (kind, t - days * DAY)):
+            out.append(dict(kind=kind, user_id=r['user_id'], name=r['name'], phone=r['phone'], count=r['n'], total=money(r['total']),
+                            days=days, flagged=r['n'] >= n, threshold=n))
+    return out
 
 
 @route('GET', r'/api/admin/threads/(\d+)', auth=False, admin=True)
@@ -1478,21 +1590,28 @@ def api_admin_resolve(req, me, b, code):
     if not d or d['status'] != 'disputed': raise ApiError('ดีลนี้ไม่ได้อยู่ระหว่างข้อพิพาท')
     dec = b.get('decision'); note = s_(b.get('note'), 300)
     t = dnow(d)
+    late_cancel = d['dispute_reason'] == LATE_CANCEL_REASON  # ผู้เข้าพักขอยกเลิกเองหลังช่วงยกเลิกฟรี (ไม่ใช่ความผิดเจ้าของ)
     if dec == 'release':
         ex('UPDATE deals SET resolution=?, resolution_note=? WHERE id=?', ('release', note, d['id']))
         complete(get_deal(code), 'admin')
+        if not late_cancel:  # ผู้ซื้อแพ้ข้อพิพาท → บันทึกประวัติ (แอดมินเห็น)
+            ex("INSERT INTO records(user_id,deal_id,kind,reason,created_at) VALUES(?,?,'lost_dispute',?,?)", (d['buyer_id'], d['id'], d['dispute_reason'], now()))
     elif dec == 'refund':
-        ex("UPDATE deals SET status='refunded', refunded_at=?, refund_amount=?, resolution='refund', resolution_note=? WHERE id=?",
-           (t, d['buyer_pay'], note, d['id']))
-        notify(d['buyer_id'], code, f'ทีมงานตัดสินคืนเงินเต็มจำนวน {fmt_baht(d["buyer_pay"])} (จำลอง)', 'wallet')
-        notify(d['seller_id'], code, 'ทีมงานตัดสินคืนเงินให้ผู้ซื้อ' + (f' · {note}' if note else ''), 'warn')
+        ex("UPDATE deals SET resolution_note=? WHERE id=?", (note, d['id']))
+        if late_cancel:
+            back, ch = refund_buyer_choice(d, t, 'refund', note)
+            notify(d['seller_id'], code, 'ทีมงานตัดสินให้ยกเลิกและคืนเงินผู้เข้าพัก (หักค่าดำเนินการ)' + (f' · {note}' if note else ''), 'warn')
+        else:
+            refund_seller_fault(d, t, 'refund', note)
+            notify(d['buyer_id'], code, f'ทีมงานตัดสินคืนเงินเต็มจำนวน {fmt_baht(d["buyer_pay"])} รวมค่าธรรมเนียม (จำลอง)', 'wallet')
+            notify(d['seller_id'], code, 'ทีมงานตัดสินคืนเงินให้ผู้ซื้อ' + (f' · {note}' if note else ''), 'warn')
     elif dec == 'partial':
         try: amt = money(b.get('refund_amount'))
         except Exception: raise ApiError('กรุณากรอกจำนวนเงินที่คืนผู้ซื้อ')
         if not 0 < amt < d['buyer_pay']: raise ApiError(f'จำนวนเงินคืนต้องมากกว่า 0 และน้อยกว่า {fmt_baht(d["buyer_pay"])}')
-        pay = money(max(0, d['seller_get'] - amt))
+        sp = partial_split(d['buyer_pay'], amt); pay = sp['pay']
         ex("""UPDATE deals SET status='partial', completed_at=?, refunded_at=?, refund_amount=?, payout_amount=?, resolution='partial',
-              resolution_note=? WHERE id=?""", (t, t, amt, pay, note, d['id']))
+              resolution_note=?, fee_charged=? WHERE id=?""", (t, t, amt, pay, note, sp['fee'], d['id']))
         if pay > 0: ex('INSERT INTO payouts(user_id,deal_id,amount,created_at) VALUES(?,?,?,?)', (d['seller_id'], d['id'], pay, now()))
         notify(d['buyer_id'], code, f'ทีมงานตัดสินคืนเงินบางส่วน {fmt_baht(amt)} ให้คุณ (จำลอง)', 'wallet')
         notify(d['seller_id'], code, f'ทีมงานตัดสินแบ่งเงิน: คุณได้รับ {fmt_baht(pay)} รอโอนรอบถัดไป', 'wallet')
@@ -1515,11 +1634,27 @@ def api_admin_social_verify(req, me, b, uid):
 
 @route('POST', '/api/admin/payouts/run', auth=False, admin=True)
 def api_admin_payouts(req, me, b):
+    """รอบโอนรายวัน: 1 ครั้ง/วัน/ผู้ขาย รวมทุกดีลที่ปล่อยเงินแล้ว · หักค่าโอนออก 30 บาท (ฟรีเมื่อยอดรวม ≥ 1,000) และค่าปรับค้าง"""
     rows = q("SELECT user_id, SUM(amount) s, COUNT(*) n FROM payouts WHERE status='pending' GROUP BY user_id")
-    ex("UPDATE payouts SET status='paid', paid_at=? WHERE status='pending'", (now(),))
+    t = now(); out = []
     for r in rows:
-        notify(r['user_id'], None, f'โอนเงินรอบวันนี้ {fmt_baht(r["s"])} ({r["n"]} ดีล) เข้าบัญชีแล้ว (จำลอง)', 'wallet')
-    return {'ok': True, 'users': len(rows)}
+        c = payout_calc(r['s'], penalty_owed(r['user_id']))
+        if c['rollover']:  # ยอดรวมไม่พอค่าโอน → ยกไปรวมรอบถัดไป
+            notify(r['user_id'], None, f'ยอดรอโอน {fmt_baht(c["gross"])} ยังไม่พอค่าโอนออก {PAYOUT_FEE} บาท · รวมไปโอนรอบถัดไป', 'wallet')
+            out.append(dict(user_id=r['user_id'], **c)); continue
+        bid = ex('INSERT INTO payout_batches(user_id,gross,transfer_fee,penalty,net,n,created_at) VALUES(?,?,?,?,?,?,?)',
+                 (r['user_id'], c['gross'], c['transfer_fee'], c['penalty'], c['net'], r['n'], t))
+        ex("UPDATE payouts SET status='paid', paid_at=?, batch_id=? WHERE status='pending' AND user_id=?", (t, bid, r['user_id']))
+        left = c['penalty']
+        for pr in q("SELECT id, amount, deducted FROM records WHERE user_id=? AND kind='penalty' AND deducted < amount ORDER BY id", (r['user_id'],)):
+            if left <= 0: break
+            take = money(min(left, pr['amount'] - pr['deducted'])); left = money(left - take)
+            ex('UPDATE records SET deducted=? WHERE id=?', (money(pr['deducted'] + take), pr['id']))
+        parts = [f'ยอดรวม {fmt_baht(c["gross"])}', 'ค่าโอนออก ฟรี (ยอดรวม ≥ 1,000)' if not c['transfer_fee'] else f'ค่าโอนออก −{fmt_baht(c["transfer_fee"])}']
+        if c['penalty']: parts.append(f'ค่าปรับ −{fmt_baht(c["penalty"])}')
+        notify(r['user_id'], None, f'โอนเงินรอบวันนี้ {fmt_baht(c["net"])} ({r["n"]} ดีล · {" · ".join(parts)}) เข้าบัญชีแล้ว (จำลอง)', 'wallet')
+        out.append(dict(user_id=r['user_id'], batch_id=bid, **c))
+    return {'ok': True, 'users': len(rows), 'batches': out}
 
 
 # ---------------- HTTP ----------------

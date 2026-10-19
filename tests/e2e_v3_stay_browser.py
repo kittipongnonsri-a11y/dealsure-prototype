@@ -155,7 +155,7 @@ with sync_playwright() as p:
     expect(G.locator('#hostTrust')).to_contain_text('พี่ปุ้ย'); expect(G.locator('#hostTrust')).to_contain_text('ตัวอย่าง')
     G.click('#guestCancelBtn'); expect(G.locator('#scBtn')).to_contain_text('ยกเลิกฟรี')
     shot(G, '15-guest-free-cancel-sheet')
-    G.click('#scBtn'); wait_text(G, 'ยกเลิกฟรี · คืนเงินเต็มจำนวน')
+    G.click('#scBtn'); wait_text(G, 'ยกเลิกในช่วงยกเลิกฟรี · คืนเงินหักค่าดำเนินการ')  # v6: หักค่าดำเนินการ 2% ขั้นต่ำ 10 บาท
 
     print('9) ปล่อยเงินอัตโนมัติ 24 ชม. หลังเช็คอิน (ปุ่มเร่งเวลา)')
     fill_stay(H, 'ห้องพักใกล้ตลาด (ทดสอบ)', 900, cin=1, nights=1)
