@@ -696,3 +696,19 @@ details.dchat .msgs{max-height:300px;overflow-y:auto;margin-top:6px}
 .pcard.sm .btn.sm{padding:6px 8px;font-size:12px;width:100%}
 .pcard .sold{font-size:12px;color:var(--muted);margin:0 0 6px}
 #seeAllGoods,#seeAllStays,.rv-more{width:100%;margin-top:10px}
+
+
+/* v9: เลือกจากสินค้าขายประจำ / ที่พักให้จอง */
+.tpl-row{display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory}
+.tpl-card{flex:0 0 auto;width:118px;scroll-snap-align:start;border:1.5px solid var(--line);background:#fff;border-radius:16px;padding:8px;text-align:left;cursor:pointer;font-family:'Sarabun';color:var(--ink);display:flex;flex-direction:column;gap:4px}
+.tpl-card.on{border-color:var(--tq);box-shadow:0 0 0 2px rgba(20,184,166,.2)}
+.tpl-card.blank{align-items:center;justify-content:center;min-height:108px;color:var(--tq-t);border-style:dashed}
+.tpl-img{display:block;width:100%;height:64px;border-radius:12px;background:#EAF6F2 center/cover no-repeat;display:grid;place-items:center;color:var(--tq-d)}
+.tpl-t{font-size:12px;font-weight:600;line-height:1.25;height:30px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.tpl-p{font-family:'Prompt';font-size:13px;font-weight:600;color:var(--tq-t)}
+.tpl-note{font-size:12.5px;color:var(--muted);margin:8px 0 0;display:flex;align-items:flex-start;gap:6px;line-height:1.4}
+.tpl-note .link{background:none;border:none;color:var(--tq-t);font:inherit;padding:0;cursor:pointer;text-decoration:underline}
+label.chk.save-as{display:flex;align-items:flex-start;gap:8px;margin:10px 0 4px;font-size:14px;line-height:1.4;cursor:pointer}
+label.chk.save-as input{margin-top:3px;flex:none;width:18px;height:18px}
+.pcard-acts{display:flex;flex-direction:column;gap:6px}
+.pcard.sm .pcard-acts .btn{font-size:11.5px;padding:6px 6px}

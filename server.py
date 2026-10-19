@@ -290,6 +290,11 @@ def save_files(items, allow=('image',), max_n=6):
     out = []
     for s in (items or [])[:max_n]:
         if not isinstance(s, str): continue
+        # ใช้รูปจากสินค้าขายประจำ / อัปโหลดเดิมได้เลย (ไม่ต้องแปลงเป็น data URL ใหม่)
+        if s.startswith('/uploads/') or s.startswith('/static/'):
+            if '..' in s or '\0' in s or not re.fullmatch(r'/(?:uploads|static)/[\w./-]+', s):
+                raise ApiError('ไฟล์ไม่ถูกต้อง')
+            out.append(s); continue
         m = re.match(r'^data:([\w/+.-]+);base64,(.*)$', s, re.S)
         if not m: raise ApiError('ไฟล์ไม่ถูกต้อง')
         mime = m.group(1).lower()
@@ -918,18 +923,39 @@ def api_create_deal(req, me, b):
         due = s_(b.get('due_date'), 10)
         if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', due): raise ApiError('กรุณาเลือกวันที่ตกลงส่งของ')
         if due < today_str(): raise ApiError('วันที่ส่งของต้องไม่ใช่วันที่ผ่านมาแล้ว')
+    # สินค้าขายประจำ → ดึงเป็นแม่แบบ (แก้ชื่อ/ราคาในดีลได้ โดยไม่แก้สินค้าต้นทาง)
+    product_id = None
+    if b.get('product_id') is not None and b.get('product_id') != '':
+        try: product_id = int(b.get('product_id'))
+        except Exception: raise ApiError('สินค้าขายประจำไม่ถูกต้อง')
+        prod = q1('SELECT * FROM products WHERE id=? AND active=1', (product_id,))
+        if not prod: raise ApiError('ไม่พบสินค้าขายประจำนี้', 404)
+        if prod['user_id'] != me['id']: raise ApiError('ใช้ได้เฉพาะสินค้าขายประจำของร้านคุณเอง')
+        pk = prod['kind'] or 'goods'
+        if kind == 'goods' and pk == 'stay': raise ApiError('รายการนี้เป็นที่พัก ไม่ใช่สินค้า')
+        if kind == 'stay' and pk != 'stay': raise ApiError('รายการนี้ไม่ใช่ที่พัก')
     check_limits(me, role, price)
     photos = save_files(b.get('photos'), max_n=6)
     f = calc_fee(price, fee_payer)
     code = new_code()
-    did = ex("""INSERT INTO deals(code,creator_id,creator_role,seller_id,buyer_id,title,description,price,photos,delivery,due_date,
+    src = 'product' if product_id else 'link'
+    did = ex("""INSERT INTO deals(code,creator_id,creator_role,seller_id,buyer_id,product_id,source,title,description,price,photos,delivery,due_date,
           fee_payer,fee,buyer_fee,seller_fee,buyer_pay,seller_get,status,created_at,kind)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?)""",
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?)""",
        (code, me['id'], role, me['id'] if role == 'seller' else None, me['id'] if role == 'buyer' else None,
-        title, s_(b.get('description'), 500), price, json.dumps(photos), delivery, due, fee_payer,
+        product_id, src, title, s_(b.get('description'), 500), price, json.dumps(photos), delivery, due, fee_payer,
         f['fee'], f['buyer_fee'], f['seller_fee'], f['buyer_pay'], f['seller_get'], now(), kind))
     if stay: set_stay(did, stay)
-    return {'code': code}
+    # ตัวเลือก: บันทึกดีลนี้เป็นสินค้าขายประจำใหม่ (เมื่อไม่ได้เลือกจากรายการเดิม)
+    saved_pid = None
+    if kind == 'goods' and role == 'seller' and not product_id and b.get('save_as_product'):
+        dl = [delivery] if delivery in DELIVERIES else ['parcel']
+        days = 3
+        saved_pid = ex('INSERT INTO products(user_id,title,description,price,photos,deliveries,fee_payer,ship_days,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+                       (me['id'], title, s_(b.get('description'), 500), price, json.dumps(photos), json.dumps(dl), fee_payer, days, now()))
+        ex('UPDATE deals SET product_id=? WHERE id=?', (saved_pid, did))
+        product_id = saved_pid
+    return {'code': code, 'product_id': product_id, 'saved_as_product': bool(saved_pid)}
 
 
 def set_stay(did, st):

@@ -223,7 +223,7 @@ async function render() {
   try {
     if (p === 'login') vLogin();
     else if (p === 'home') await vHome();
-    else if (p === 'create') vCreate();
+    else if (p === 'create') await vCreate();
     else if (p === 'd') await vDeal(a);
     else if (p === 'shop') {
       const sub = route3();
@@ -375,11 +375,97 @@ async function vHome() {
 /* ---------------- create deal (สินค้า / ที่พัก) ---------------- */
 function newForm() {
   return {kind: 'goods', role: 'seller', title: '', desc: '', price: '', photos: [], delivery: 'parcel', due: todayStr(3), fee: 'half',
-    address: '', map: '', cin: todayStr(7), cinTime: '14:00', cout: todayStr(9), guests: 2, host: '', fcd: 3};
+    address: '', map: '', cin: todayStr(7), cinTime: '14:00', cout: todayStr(9), guests: 2, host: '', fcd: 3,
+    product_id: null, product_name: '', save_as_product: false};
 }
 function startStay() { S.F = Object.assign(S.F && S.F.kind === 'stay' ? S.F : newForm(), {kind: 'stay'}); if (route().p === 'create') vCreate(); else location.hash = '#/create'; }
-function vCreate() {
+
+/* ---- สร้างดีลจากสินค้าขายประจำ / ที่พักให้จอง ---- */
+async function loadMyCatalog() {
+  if (!S.me) return {goods: [], stays: []};
+  if (S.myCatalog && S.myCatalog.uid === S.me.id) return S.myCatalog;
+  try {
+    const u = await api('/shops/' + S.me.id);
+    S.myCatalog = {uid: S.me.id, goods: shopGoods(u), stays: shopStays(u)};
+  } catch (e) { S.myCatalog = {uid: S.me.id, goods: [], stays: []}; }
+  return S.myCatalog;
+}
+function clearProductTemplate() {
+  const kind = (S.F && S.F.kind) || 'goods', role = (S.F && S.F.role) || 'seller';
+  S.F = Object.assign(newForm(), {kind, role});
+  vCreate();
+}
+function applyProductTemplate(p, opts) {
+  opts = opts || {};
+  const F = S.F || (S.F = newForm());
+  const sy = (p.kind || 'goods') === 'stay';
+  F.product_id = p.id;
+  F.product_name = p.title;
+  F.save_as_product = false;
+  F.kind = sy ? 'stay' : 'goods';
+  F.role = 'seller';
+  F.title = p.title || '';
+  F.desc = p.description || '';
+  F.price = String(Math.round(+p.price) || '');
+  F.photos = (p.photos || []).slice();
+  F.fee = p.fee_payer || 'half';
+  if (sy) {
+    F.address = p.address || '';
+    F.map = p.map_url || '';
+    F.host = p.host_contact || (S.me && S.me.name) || '';
+    F.cinTime = p.checkin_time || '14:00';
+    F.guests = Math.min(2, p.max_guests || 2);
+    F.fcd = p.free_cancel_days != null ? p.free_cancel_days : 3;
+    // ราคาต่อคืน → กรอกราคารวม 2 คืนเป็นค่าเริ่มต้น (แก้ได้)
+    const nights = Math.max(1, nightsOf(F.cin, F.cout) || 2);
+    F.price = String(Math.round((+p.price || 0) * nights));
+  } else {
+    F.delivery = ((p.deliveries || [])[0]) || 'parcel';
+    F.due = F.due || todayStr(p.ship_days || 3);
+  }
+  if (opts.go || route().p !== 'create') location.hash = '#/create';
+  else vCreate();
+  if (opts.toast !== false) toast(sy ? 'ดึงข้อมูลที่พักให้จองแล้ว · แก้รายละเอียดได้ก่อนส่ง' : 'ดึงข้อมูลจากสินค้าขายประจำแล้ว · แก้ชื่อหรือราคาได้ก่อนส่ง');
+}
+function startDealFromProduct(pid) {
+  const list = (S.shop && S.shop.products) || (S.myCatalog ? S.myCatalog.goods.concat(S.myCatalog.stays) : []);
+  const p = list.find(x => x.id === pid);
+  if (!p) { toast('ไม่พบรายการนี้'); return; }
+  applyProductTemplate(p, {go: true});
+}
+function pickTplCard(p, on) {
+  const sy = (p.kind || 'goods') === 'stay';
+  const ph = (p.photos && p.photos[0]) ? `background-image:url('${esc(p.photos[0])}')` : '';
+  return `<button type="button" class="tpl-card${on ? ' on' : ''}" data-pid="${p.id}" onclick="applyProductTemplate((S.myCatalog.${sy ? 'stays' : 'goods'}).find(x=>x.id===${p.id}))">
+    <span class="tpl-img" style="${ph}">${ph ? '' : ic(sy ? 'home' : 'box', 20)}</span>
+    <span class="tpl-t">${esc(p.title)}</span>
+    <span class="tpl-p">${baht(p.price)}${sy ? '<span class="muted">/คืน</span>' : ''}</span>
+  </button>`;
+}
+function productPickerHtml(F, cat) {
+  const stay = F.kind === 'stay';
+  const list = stay ? cat.stays : cat.goods;
+  if (F.role !== 'seller' || !list.length) return '';
+  const label = stay ? 'เลือกจากที่พักให้จอง' : 'เลือกจากสินค้าขายประจำ';
+  const blank = stay ? 'กรอกเอง (ไม่ใช้ที่พักให้จอง)' : 'กรอกเอง';
+  return `<div class="card" id="tplPick">
+    <h3>${ic(stay ? 'home' : 'store', 18)}${label}</h3>
+    <p class="shop-sub">เลือกแล้วระบบกรอกให้ · แก้ชื่อ ราคา หรือรายละเอียดได้ก่อนส่งลิงก์</p>
+    <div class="tpl-row" id="tplRow">
+      <button type="button" class="tpl-card blank${F.product_id ? '' : ' on'}" id="tplBlank" onclick="clearProductTemplate()">${ic('plus', 18)}<span class="tpl-t">${blank}</span></button>
+      ${list.slice(0, 12).map(p => pickTplCard(p, F.product_id === p.id)).join('')}
+    </div>
+    ${F.product_id ? `<p class="tpl-note" id="tplNote">${ic('info', 14)}ดึงข้อมูลจาก: <b>${esc(F.product_name || '')}</b> · แก้ชื่อหรือราคาได้ก่อนส่ง · <button type="button" class="link" onclick="clearProductTemplate()">ยกเลิกการใช้แม่แบบ</button></p>` : ''}
+  </div>`;
+}
+function saveAsProductHtml(F) {
+  if (F.kind !== 'goods' || F.role !== 'seller' || F.product_id) return '';
+  return `<label class="chk save-as" id="saveAsWrap"><input type="checkbox" id="saveAsProduct"${F.save_as_product ? ' checked' : ''}> บันทึกเป็นสินค้าขายประจำ <span class="opt">(ไว้สร้างดีลซ้ำครั้งหน้า)</span></label>`;
+}
+
+async function vCreate() {
   const F = S.F || (S.F = newForm()), stay = F.kind === 'stay', R = stay ? RLS : RLG;
+  const cat = await loadMyCatalog();
   const kindCard = `<div class="card">
       <label class="lb">ดีลนี้เป็น…</label>
       <div class="seg kind-seg" id="kindSeg"><button data-v="goods">${ic('box', 18)}สินค้า</button><button data-v="stay">${ic('home', 18)}ที่พัก</button></div>
@@ -448,6 +534,7 @@ function vCreate() {
   $('#view').innerHTML = header({title: stay ? 'สร้างดีลที่พัก' : 'สร้างดีลใหม่', sub: stay ? 'เงินพักไว้จนผู้เข้าพักเช็คอินได้จริง กันที่พักปลอม' : 'เงินถูกพักไว้จนกว่าผู้ซื้อจะได้ของ ปลอดภัยทั้งสองฝ่าย'}) + `
   <div class="wrap">
     ${kindCard}
+    ${productPickerHtml(F, cat)}
     <div class="card">
       <label class="lb">ฉันเป็น…</label>
       <div class="seg" id="roleSeg"><button data-v="seller">ฉันเป็น${R.seller}</button><button data-v="buyer">ฉันเป็น${R.buyer}</button></div>
@@ -471,6 +558,7 @@ function vCreate() {
     </div>
     <div id="limitNotes"></div>
     ${noteHtml('info', 'ดีลที่มีมูลค่า <b>เกิน 3,000 บาท</b> ต้องยืนยันตัวตนก่อน · ผู้ใช้ใหม่สร้างดีลได้ <b>สูงสุด 5,000 บาท/ดีล</b>')}
+    ${saveAsProductHtml(F)}
     <button class="btn primary mt8" id="createBtn" onclick="createDeal(this)">${ic('share', 20)}${stay ? 'สร้างดีลที่พัก & รับลิงก์' : 'สร้างดีล & รับลิงก์'}</button>
     <p class="footer-note">ส่งลิงก์ให้อีกฝ่ายทาง LINE หรือ Facebook Messenger ได้ทันที</p>
   </div>`;
@@ -511,7 +599,7 @@ function vCreate() {
     $('#limitNotes').innerHTML = h;
   };
   $$('#kindSeg button').forEach(b => b.onclick = () => { if (F.kind !== b.dataset.v) { F.kind = b.dataset.v; vCreate(); } });
-  $$('#roleSeg button').forEach(b => b.onclick = () => { F.role = b.dataset.v; upd(); });
+  $$('#roleSeg button').forEach(b => b.onclick = () => { const prev = F.role; F.role = b.dataset.v; if (prev !== F.role && (prev === 'seller' || F.role === 'seller')) { if (F.role !== 'seller') { F.product_id = null; F.product_name = ''; F.save_as_product = false; } vCreate(); } else upd(); });
   $$('#feeSeg button').forEach(b => b.onclick = () => { F.fee = b.dataset.v; upd(); });
   $('#fTitle').oninput = e => F.title = e.target.value;
   $('#fDesc').oninput = e => F.desc = e.target.value;
@@ -527,6 +615,8 @@ function vCreate() {
     $('#fDue').onchange = e => { F.due = e.target.value; upd(); };
   }
   renderPhotos(); upd();
+  const sav = $('#saveAsProduct');
+  if (sav) sav.onchange = e => { F.save_as_product = e.target.checked; };
 }
 function addPhotos() {
   pickFiles('image/*', true, async files => {
@@ -546,8 +636,11 @@ function createDeal(btn) {
         address: F.address, map_url: F.map.trim(), checkin_date: F.cin, checkin_time: F.cinTime, checkout_date: F.cout, guests: F.guests,
         host_contact: F.host, free_cancel_days: F.fcd}
       : {role: F.role, title: F.title, description: F.desc, price: F.price, photos: F.photos, delivery: F.delivery, due_date: F.due, fee_payer: F.fee};
+    if (F.product_id) body.product_id = F.product_id;
+    if (!stay && F.role === 'seller' && !F.product_id && F.save_as_product) body.save_as_product = true;
     const r = await api('/deals', body);
     const f = calcFee(+F.price, F.fee); const role = F.role, title = F.title;
+    if (r.saved_as_product) S.myCatalog = null;
     S.F = null; S.pendingShare = {code: r.code, role, title, amount: f.buyer};
     location.hash = '#/d/' + r.code;
   });
@@ -592,7 +685,7 @@ function submitId(btn) {
     await api('/me/verify-id', {image: S.idImg}); await loadMe();
     closeSheet(); toast('ยืนยันตัวตนสำเร็จ (ทดสอบ – อนุมัติอัตโนมัติ)');
     const {p} = route(); const y = window.scrollY;
-    if (p === 'create') vCreate(); else if (p === 'd') await refreshDeal(); else if (p === 'me') await vMe(); else if (p === 'shop') await vShop(route().a);
+    if (p === 'create') await vCreate(); else if (p === 'd') await refreshDeal(); else if (p === 'me') await vMe(); else if (p === 'shop') await vShop(route().a);
     window.scrollTo(0, y);
   });
 }
@@ -1224,7 +1317,7 @@ function stayBookSubmit(btn) {
 }
 function stayProductSheet() {
   S.prod = {photos: [], fee: 'half', kind: 'stay'};
-  openSheet(`<h2>เพิ่มที่พักในร้าน</h2>
+  openSheet(`<h2>เพิ่มที่พักให้จอง</h2>
     <label class="lb">ชื่อที่พัก</label><input class="input" id="pTitle" maxlength="120" placeholder="เช่น บ้านไม้ริมดอย ห้องวิวภูเขา">
     <label class="lb">ราคาต่อคืน (บาท)</label><div class="price-wrap"><input class="input" id="pPrice" inputmode="numeric" placeholder="0"><span>บาท</span></div>
     <label class="lb">ที่อยู่</label><textarea class="input" id="pAddr" maxlength="300"></textarea>
@@ -1246,7 +1339,7 @@ function stayProductSubmit(btn) {
     await api('/products', {kind: 'stay', title: $('#pTitle').value, price: $('#pPrice').value.replace(/,/g, ''), address: $('#pAddr').value, map_url: $('#pMap').value.trim(),
       host_contact: $('#pHost').value, checkin_time: $('#pTime').value, max_guests: $('#pMax').value, free_cancel_days: $('#pFcd').value,
       description: $('#pDesc').value, photos: S.prod.photos, fee_payer: S.prod.fee});
-    closeSheet(); toast('เพิ่มที่พักแล้ว ✓'); await refreshShopView();
+    closeSheet(); S.myCatalog = null; toast('เพิ่มที่พักให้จองแล้ว ✓'); await refreshShopView();
   });
 }
 
@@ -1377,8 +1470,12 @@ function shopProductCard(p, mine, compact) {
       <span class="badge b-green">${sy ? '🏠 ที่พัก' : (p.deliveries || []).map(x => (DLV[x] || ['?'])[0]).join(' ')}</span></div>
     <div class="b"><div class="t">${esc(p.title)}</div>
       <div class="p">${baht(p.price)}${sy ? '<span class="small muted" style="font-weight:400"> /คืน</span>' : ''}</div>${sold}
-      ${mine ? `<button class="btn ghost sm" onclick="delProduct(this,${p.id})">${sy ? 'ซ่อนที่พัก' : 'ซ่อนสินค้า'}</button>`
-             : `<button class="btn primary sm" onclick="buySheet(${p.id})">${sy ? 'จองแบบปลอดภัย' : 'ซื้อแบบปลอดภัย'}</button>`}</div></div>`;
+      ${mine
+        ? `<div class="pcard-acts">${sy
+            ? `<button class="btn primary sm" onclick="startDealFromProduct(${p.id})">สร้างดีลที่พักจากรายการนี้</button>`
+            : `<button class="btn primary sm" onclick="startDealFromProduct(${p.id})">สร้างดีลจากสินค้านี้</button>`}
+            <button class="btn ghost sm" onclick="delProduct(this,${p.id})">${sy ? 'ซ่อนที่พักให้จอง' : 'ซ่อนสินค้า'}</button></div>`
+        : `<button class="btn primary sm" onclick="buySheet(${p.id})">${sy ? 'จองแบบปลอดภัย' : 'ซื้อแบบปลอดภัย'}</button>`}</div></div>`;
 }
 function shopGoodsCard(u, mine) {
   const goods = shopGoods(u), n = goods.length, show = goods.slice(0, SHOP_PREVIEW);
@@ -1394,28 +1491,28 @@ function shopStaysCard(u, mine) {
   const stays = shopStays(u), n = stays.length, show = stays.slice(0, SHOP_PREVIEW);
   if (!n && !mine) return '';
   return `<div class="card" id="shopStays">
-    <h3>ที่พักในร้าน ${n ? `<span class="muted small" style="font-weight:400;margin-left:auto">${fmt(n)} รายการ</span>` : ''}</h3>
+    <h3>ที่พักให้จอง ${n ? `<span class="muted small" style="font-weight:400;margin-left:auto">${fmt(n)} รายการ</span>` : ''}</h3>
     <p class="shop-sub">จองผ่านระบบพักเงิน กันที่พักปลอม</p>
-    ${mine ? `<div class="twobtn" style="margin-bottom:10px"><button class="btn ghost sm" id="addStayBtn" onclick="stayProductSheet()">${ic('home', 16)}เพิ่มที่พัก</button></div>` : ''}
+    ${mine ? `<div class="twobtn" style="margin-bottom:10px"><button class="btn ghost sm" id="addStayBtn" onclick="stayProductSheet()">${ic('home', 16)}เพิ่มที่พักให้จอง</button></div>` : ''}
     ${n ? `<div class="pgrid compact">${show.map(p => shopProductCard(p, mine, true)).join('')}</div>
       ${n > SHOP_PREVIEW ? `<button class="btn ghost sm rv-more" id="seeAllStays" onclick="location.hash='#/shop/${u.id}/stays'">ดูทั้งหมด (${fmt(n)})</button>` : ''}`
-      : `<div class="empty-st">${mine ? 'ยังไม่มีที่พักในร้าน กดเพิ่มที่พักเพื่อให้ลูกค้าจองแบบปลอดภัยได้' : ''}</div>`}</div>`;
+      : `<div class="empty-st">${mine ? 'ยังไม่มีที่พักให้จอง เพิ่มไว้เพื่อให้ลูกค้าจองแบบปลอดภัยได้ง่ายขึ้น' : ''}</div>`}</div>`;
 }
 async function vShopCatalog(id, kind) {
   const u = await api('/shops/' + encodeURIComponent(id)); S.shop = u;
   const mine = S.me && S.me.id === u.id;
   const list = kind === 'stay' ? shopStays(u) : shopGoods(u);
-  const title = kind === 'stay' ? 'ที่พักทั้งหมด' : 'สินค้าขายประจำทั้งหมด';
+  const title = kind === 'stay' ? 'ที่พักให้จองทั้งหมด' : 'สินค้าขายประจำทั้งหมด';
   const sub = kind === 'stay' ? 'จองผ่านระบบพักเงินได้ทุกห้อง' : 'สินค้าที่ร้านขายเป็นประจำ กดสร้างดีลได้เลย';
   $('#view').innerHTML = header({title, sub: esc(u.shop_name), back: true}) + `
     <div class="wrap">
       <div class="card">
         <p class="shop-sub" style="margin-top:0">${sub} · ${fmt(list.length)} รายการ</p>
         ${mine ? (kind === 'stay'
-          ? `<div class="twobtn" style="margin-bottom:10px"><button class="btn ghost sm" onclick="stayProductSheet()">${ic('home', 16)}เพิ่มที่พัก</button></div>`
+          ? `<div class="twobtn" style="margin-bottom:10px"><button class="btn ghost sm" onclick="stayProductSheet()">${ic('home', 16)}เพิ่มที่พักให้จอง</button></div>`
           : `<div class="twobtn" style="margin-bottom:10px"><button class="btn ghost sm" onclick="productSheet()">${ic('plus', 16)}เพิ่มสินค้าขายประจำ</button></div>`) : ''}
         ${list.length ? `<div class="pgrid">${list.map(p => shopProductCard(p, mine, false)).join('')}</div>`
-          : `<div class="empty-st">${mine ? (kind === 'stay' ? 'ยังไม่มีที่พัก' : 'ยังไม่มีสินค้าขายประจำ') : 'ยังไม่มีรายการ'}</div>`}
+          : `<div class="empty-st">${mine ? (kind === 'stay' ? 'ยังไม่มีที่พักให้จอง' : 'ยังไม่มีสินค้าขายประจำ') : 'ยังไม่มีรายการ'}</div>`}
       </div>
       <button class="btn ghost sm" style="width:100%" onclick="location.hash='#/shop/${u.id}'">← กลับหน้าร้าน</button>
     </div>`;
@@ -1477,14 +1574,14 @@ function productSubmit(btn) {
   busy(btn, async () => {
     if (!S.prod.deliveries.length) throw new Error('เลือกวิธีส่งมอบอย่างน้อย 1 แบบ');
     await api('/products', {title: $('#pTitle').value, price: $('#pPrice').value.replace(/,/g, ''), description: $('#pDesc').value, photos: S.prod.photos, deliveries: S.prod.deliveries, fee_payer: S.prod.fee, ship_days: $('#pDays').value});
-    closeSheet(); toast('เพิ่มสินค้าขายประจำแล้ว ✓'); await refreshShopView();
+    closeSheet(); S.myCatalog = null; toast('เพิ่มสินค้าขายประจำแล้ว ✓'); await refreshShopView();
   });
 }
 function delProduct(btn, id) {
   const p = (S.shop && S.shop.products || []).find(x => x.id === id);
   const sy = p && p.kind === 'stay';
-  if (!confirm(sy ? 'ซ่อนที่พักนี้จากหน้าร้าน?' : 'ซ่อนสินค้าขายประจำนี้จากหน้าร้าน?')) return;
-  busy(btn, async () => { await api(`/products/${id}/delete`, {}); toast(sy ? 'ซ่อนที่พักแล้ว' : 'ซ่อนสินค้าแล้ว'); await refreshShopView(); });
+  if (!confirm(sy ? 'ซ่อนที่พักให้จองนี้จากหน้าร้าน?' : 'ซ่อนสินค้าขายประจำนี้จากหน้าร้าน?')) return;
+  busy(btn, async () => { await api(`/products/${id}/delete`, {}); S.myCatalog = null; toast(sy ? 'ซ่อนที่พักให้จองแล้ว' : 'ซ่อนสินค้าแล้ว'); await refreshShopView(); });
 }
 
 /* ---------------- profile & account ---------------- */

@@ -183,7 +183,7 @@ pr = H.ok('/products', {'kind': 'stay', 'title': 'คอนโดใกล้ BT
 mp = [p for p in C().ok(f'/shops/{uh["id"]}')['products'] if p['id'] == pr['id']][0]
 check('เจ้าของลงที่พักในหน้าร้านได้', mp['kind'] == 'stay' and mp['checkin_time'] == '15:00' and mp['max_guests'] == 2 and mp['free_cancel_days'] == 2)
 s, e = H.req('/products', {'kind': 'stay', 'title': 'x', 'price': 900, 'address': 'x', 'map_url': 'http://bad', 'host_contact': 'x'})
-check('ลงที่พักในร้านต้องมีลิงก์ Google Maps', s == 400)
+check('ลงที่พักให้จองต้องมีลิงก์ Google Maps', s == 400)
 
 print('10) แชทในดีลที่พัก')
 dd = deal(G, code2)
