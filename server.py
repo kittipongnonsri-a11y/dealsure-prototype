@@ -1529,6 +1529,80 @@ CT = {'.html': 'text/html; charset=utf-8', '.js': 'application/javascript; chars
 SPRITE = open(os.path.join(STATIC, 'sprite.html'), encoding='utf-8').read()
 
 
+# ---- legal pages (/terms, /privacy): render legal/*.md (Markdown subset) into styled HTML ----
+LEGAL_DIR = os.path.join(BASE, 'legal')
+LEGAL_PAGES = {'/terms': 'terms', '/privacy': 'privacy'}
+
+
+def _md_inline(s):
+    import html as _h
+    s = _h.escape(s, quote=False)
+    s = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', s)
+    def link(m):
+        url = m.group(2)
+        if not re.match(r'^(/|https?://)', url): return m.group(1)
+        return f'<a href="{_h.escape(url)}">{m.group(1)}</a>'
+    s = re.sub(r'\[([^\]]+)\]\(([^)\s]+)\)', link, s)
+    s = re.sub(r'\[([^\]<>]{2,80})\]', r'<span class="ph-fill">[\1]</span>', s)  # placeholders like [ที่อยู่]
+    return s
+
+
+def md_blocks(lines):
+    """แปลง Markdown แบบง่าย (หัวข้อ ##, ย่อหน้า, รายการ -, ตัวหนา, ลิงก์) เป็น HTML"""
+    out, para, items = [], [], []
+    def flush():
+        if para:
+            t = ' '.join(para); m = re.match(r'^(\d+\.\d+)\s+(.*)$', t)
+            out.append(f'<p><span class="no">{m.group(1)}</span> {_md_inline(m.group(2))}</p>' if m else f'<p>{_md_inline(t)}</p>')
+            para.clear()
+        if items:
+            out.append('<ul>' + ''.join(f'<li>{_md_inline(i)}</li>' for i in items) + '</ul>'); items.clear()
+    for ln in lines:
+        ln = ln.rstrip()
+        if not ln.strip(): flush(); continue
+        if ln.startswith('- '):
+            if para: flush()
+            items.append(ln[2:].strip()); continue
+        if items: flush()
+        para.append(ln.strip())
+    flush()
+    return '\n'.join(out)
+
+
+def render_legal(key):
+    src = open(os.path.join(LEGAL_DIR, key + '.md'), encoding='utf-8').read().splitlines()
+    title, meta, summary, sections, cur, quote = '', '', '', [], None, []
+    for ln in src:
+        if ln.startswith('# ') and not title: title = ln[2:].strip(); continue
+        if ln.startswith('>'): quote.append(ln[1:].lstrip() if len(ln) > 1 else ''); continue
+        if ln.startswith('## '):
+            cur = [ln[3:].strip(), []]; sections.append(cur); continue
+        if cur is None:
+            if ln.strip() and not meta: meta = ln.strip()
+            continue
+        cur[1].append(ln)
+    if quote:
+        head = quote[0]; body = quote[1:]
+        summary = (f'<section class="card legal-sum" aria-label="สรุปสั้นๆ"><h3><svg width="18" height="18"><use href="#shield"/></svg>'
+                   f'{_md_inline(head.replace("**", ""))}</h3>{md_blocks(body)}</section>')
+    toc, body = [], []
+    for i, (h, ls) in enumerate(sections, 1):
+        sid = f's{i}'
+        toc.append(f'<li><a href="#{sid}">{_md_inline(re.sub(r"^[0-9]+\.\s*", "", h))}</a></li>')
+        body.append(f'<section class="card legal-sec" id="{sid}"><h2>{_md_inline(h)}</h2>{md_blocks(ls)}</section>')
+    short = 'ข้อตกลงการใช้บริการ' if key == 'terms' else 'นโยบายความเป็นส่วนตัว'
+    tpl = open(os.path.join(STATIC, 'legal.html'), encoding='utf-8').read()
+    rep = {'{{TITLE}}': _md_inline(title.replace(' ดีลชัวร์ (DealSure)', '')), '{{META}}': _md_inline(meta),
+           '{{DESC}}': f'{short}ของดีลชัวร์ (DealSure) – ตัวกลางพักเงินสำหรับซื้อขายในกลุ่ม Facebook / LINE และจองที่พัก',
+           '{{ON_TERMS}}': 'on' if key == 'terms' else '', '{{ON_PRIVACY}}': 'on' if key == 'privacy' else '',
+           '{{SUMMARY}}': summary, '{{NSEC}}': str(len(sections)), '{{TOC}}': ''.join(toc), '{{BODY}}': '\n'.join(body),
+           '{{OTHER_HREF}}': '/privacy' if key == 'terms' else '/terms',
+           '{{OTHER_LABEL}}': 'อ่านนโยบายความเป็นส่วนตัว' if key == 'terms' else 'อ่านข้อตกลงการใช้บริการ',
+           '<!--SPRITE-->': SPRITE}
+    for k, v in rep.items(): tpl = tpl.replace(k, v)
+    return tpl
+
+
 class H(BaseHTTPRequestHandler):
     server_version = 'DealSure/0.1'
 
@@ -1612,6 +1686,9 @@ class H(BaseHTTPRequestHandler):
     def static(self, path):
         if path in ('/', '/index.html') or path.startswith('/d/') or path.startswith('/s/'):
             return self.page('index.html')
+        lk = LEGAL_PAGES.get(path.rstrip('/') or '/')
+        if lk:
+            return self.send(200, render_legal(lk), 'text/html; charset=utf-8', {'Cache-Control': 'no-cache'})
         if path in ('/admin', '/admin/'):
             return self.page('admin.html')
         if path == '/favicon.ico': path = '/static/logo/favicon-32.png'

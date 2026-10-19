@@ -107,6 +107,8 @@ function resizeImage(file, max = 1280) {
 const readDataUrl = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
 
 /* ---------------- shared UI pieces ---------------- */
+const LEGAL_CONSENT = `<p class="small muted mt12 legal-consent" id="legalConsent">การเข้าใช้งานถือว่าคุณยอมรับ <a href="/terms">ข้อตกลงการใช้บริการ</a> และ <a href="/privacy">นโยบายความเป็นส่วนตัว</a> ของดีลชัวร์</p>`;
+const legalMini = () => `<span class="legal-mini"><a href="/terms">ข้อตกลงการใช้บริการ</a> · <a href="/privacy">นโยบายความเป็นส่วนตัว</a></span>`;
 function bellBtn() {
   return `<button class="icon-btn" aria-label="การแจ้งเตือน" onclick="toggleNotif()">${ic('bell', 22)}${S.unread ? `<span class="dot">${S.unread > 9 ? '9+' : S.unread}</span>` : ''}</button>`;
 }
@@ -272,6 +274,7 @@ function vLogin(step = 1, data = {}) {
       <input class="input" id="lgPhone" type="tel" inputmode="numeric" maxlength="12" placeholder="0812345678" value="${esc(data.phone || '')}" autocomplete="tel">
       <p class="small muted mt8">เราจะส่งรหัส OTP 6 หลักให้คุณ (โหมดทดลอง: แสดงรหัสบนหน้าจอ ไม่ส่ง SMS จริง)</p>
       <button class="btn primary mt12" id="lgBtn" onclick="loginStart(this)">ขอรหัส OTP</button>
+      ${LEGAL_CONSENT}
     </div>
     <div class="card">
       <h3>เข้าสู่ระบบด้วยบัญชีอื่น <span class="demo" style="margin-left:auto">เร็ว ๆ นี้</span></h3>
@@ -289,9 +292,10 @@ function vLogin(step = 1, data = {}) {
       <label class="lb">รหัส 6 หลัก</label>
       <input class="input otp-input" id="lgCode" inputmode="numeric" maxlength="6" placeholder="••••••" autocomplete="one-time-code">
       <button class="btn primary mt12" id="lgVerify" onclick="loginVerify(this)">ยืนยันและเข้าสู่ระบบ</button>
+      ${LEGAL_CONSENT}
     </div>`;
   v.innerHTML = header({title: 'เข้าสู่ระบบ', sub: 'ซื้อขายกับคนในกลุ่มเฟซ / LINE ได้อย่างสบายใจ เงินถูกพักไว้จนกว่าผู้ซื้อจะได้ของ', right: ''}) +
-    `<div class="wrap">${body}<p class="footer-note">ดีลชัวร์ (DealSure) · ต้นแบบสำหรับทดลองใช้ · ไม่มีเงินจริง</p></div>`;
+    `<div class="wrap">${body}<p class="footer-note">ดีลชัวร์ (DealSure) · ต้นแบบสำหรับทดลองใช้ · ไม่มีเงินจริง${legalMini()}</p></div>`;
   if (step === 2) $('#lgCode').addEventListener('keydown', e => { if (e.key === 'Enter') loginVerify($('#lgVerify')); });
 }
 function loginStart(btn) {
@@ -343,6 +347,7 @@ async function vHome() {
       ${done.length ? `<h3 class="sec-h">${ic('check', 18)}ดีลที่จบแล้ว <span class="muted small">${done.length} ดีล</span></h3>${pagedList('done', done, row, 5, 'dcards')}` : ''}
       ${shops ? `<div class="card"><h3>${ic('store', 18)}ร้านแนะนำ</h3>${shops}</div>` : ''}
       ${noteHtml('info', '<b>โหมดทดลอง – ไม่มีเงินจริง</b> การจ่ายเงิน การโอน และการยืนยันตัวตนทั้งหมดเป็นการจำลอง ใช้ปุ่ม “เร่งเวลา (ทดสอบ)” ในหน้าดีลเพื่อข้ามเวลารอได้')}
+      <p class="footer-note">ดีลชัวร์ (DealSure) · ต้นแบบ${legalMini()}</p>
     </div>`;
 }
 
@@ -698,7 +703,7 @@ async function vDeal(code) {
     `<div class="wrap">${partyCard && isStay(d) && otherRole === 'seller' ? partyCard : ''}${ac}${disp}${team}${partyCard && !(isStay(d) && otherRole === 'seller') ? partyCard : ''}${chat}${sum}${protect}${tl}${dealReviews(d)}${test}
      ${st === 'open' && role ? `<div class="twobtn"><button class="btn ghost sm" onclick="shareSheet(S.deal.code,'${role}',S.deal.title,S.deal.buyer_pay)">${ic('share', 16)}แชร์ลิงก์</button><button class="btn danger sm" onclick="cancelDeal(this)">ยกเลิกดีล</button></div>` : ''}
      ${st === 'accepted' && role ? `<button class="btn danger sm" onclick="cancelDeal(this)">ยกเลิกดีล (ก่อนจ่ายเงิน)</button>` : ''}
-     <p class="footer-note">${foot}</p></div>`;
+     <p class="footer-note">${foot}${legalMini()}</p></div>`;
   updateDots(); mountThreads();
   if (S.pendingShare && S.pendingShare.code === d.code) { const p = S.pendingShare; S.pendingShare = null; shareSheet(p.code, p.role, p.title, p.amount, true); }
 }
@@ -1387,8 +1392,11 @@ async function vMe() {
     ${socialForm(u)}
     <div class="card"><h3>เชื่อมต่อบัญชี <span class="demo" style="margin-left:auto">เร็ว ๆ นี้</span></h3>
       <div class="soon"><button disabled><span class="ic" style="background:#06C755">LINE</span>LINE</button><button disabled><span class="ic" style="background:#1877F2">f</span>Facebook</button></div></div>
+    <div class="card" id="legalCard"><h3>${ic('shield', 18)}ข้อตกลงและนโยบาย</h3>
+      <p class="small muted">อ่านกติกาการพักเงิน ค่าธรรมเนียม การแจ้งปัญหา และวิธีที่เราดูแลข้อมูลของคุณ</p>
+      <div class="legal-links mt12"><a class="btn ghost sm" href="/terms">ข้อตกลงการใช้บริการ</a><a class="btn ghost sm" href="/privacy">ความเป็นส่วนตัว</a></div></div>
     <button class="btn danger" onclick="logout()">ออกจากระบบ</button>
-    <p class="footer-note">ดีลชัวร์ (DealSure) ต้นแบบ · โหมดทดลอง – ไม่มีเงินจริง</p></div>`;
+    <p class="footer-note">ดีลชัวร์ (DealSure) ต้นแบบ · โหมดทดลอง – ไม่มีเงินจริง${legalMini()}</p></div>`;
 }
 function saveMe(btn) { busy(btn, async () => { await api('/me/update', {name: $('#meName').value, shop_name: $('#meShop').value, shop_bio: $('#meBio').value}); toast('บันทึกแล้ว ✓'); await vMe(); }); }
 
