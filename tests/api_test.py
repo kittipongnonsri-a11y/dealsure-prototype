@@ -178,7 +178,7 @@ print('8) ซื้อจากหน้าร้านตัวอย่าง 
 shops = B.ok('/shops')['shops']
 gold = [s for s in shops if s['stats']['level'] == 'gold'][0]
 shop = B.ok(f'/shops/{gold["id"]}')
-check('หน้าร้านตัวอย่างเป็น Gold + มีสินค้า', shop['stats']['level'] == 'gold' and shop['verified'] and len(shop['products']) >= 4)
+check('หน้าร้านตัวอย่างเป็น Gold + มีสินค้าขายประจำ ≥ 6', shop['stats']['level'] == 'gold' and shop['verified'] and len([p for p in shop['products'] if p.get('kind') != 'stay']) >= 6)
 watch = [p for p in shop['products'] if p['price'] == 3200][0]
 lens = [p for p in shop['products'] if p['price'] == 6500][0]
 s, e = B.req(f'/products/{watch["id"]}/buy', {'delivery': 'parcel'})

@@ -225,7 +225,12 @@ async function render() {
     else if (p === 'home') await vHome();
     else if (p === 'create') vCreate();
     else if (p === 'd') await vDeal(a);
-    else if (p === 'shop') await vShop(a);
+    else if (p === 'shop') {
+      const sub = route3();
+      if (sub === 'products') await vShopCatalog(a, 'goods');
+      else if (sub === 'stays') await vShopCatalog(a, 'stay');
+      else await vShop(a);
+    }
     else if (p === 'myshop') { location.replace('#/shop/' + S.me.id); return; }
     else if (p === 'u') await vUser(a);
     else if (p === 'me') await vMe();
@@ -1241,7 +1246,7 @@ function stayProductSubmit(btn) {
     await api('/products', {kind: 'stay', title: $('#pTitle').value, price: $('#pPrice').value.replace(/,/g, ''), address: $('#pAddr').value, map_url: $('#pMap').value.trim(),
       host_contact: $('#pHost').value, checkin_time: $('#pTime').value, max_guests: $('#pMax').value, free_cancel_days: $('#pFcd').value,
       description: $('#pDesc').value, photos: S.prod.photos, fee_payer: S.prod.fee});
-    closeSheet(); toast('เพิ่มที่พักแล้ว ✓'); await vShop(route().a);
+    closeSheet(); toast('เพิ่มที่พักแล้ว ✓'); await refreshShopView();
   });
 }
 
@@ -1354,14 +1359,65 @@ async function vShop(id) {
     <div class="wrap" style="padding-top:0">
       <div class="card"><h3>คะแนนความน่าเชื่อถือ</h3>${trustStats(s, u)}
         <a class="btn ghost sm mt12" href="#/u/${u.id}">${ic('user', 16)}ดูประวัติดีลและโปรไฟล์</a></div>
-      <div class="card"><h3>${u.products.some(p => p.kind === 'stay') ? 'สินค้า / ที่พักในร้าน' : 'สินค้าในร้าน'} <span class="muted small" style="font-weight:400;margin-left:auto">${u.products.length} รายการ</span></h3>
-        ${mine ? `<div class="twobtn" style="margin-bottom:12px"><button class="btn ghost sm" onclick="productSheet()">${ic('plus', 16)}เพิ่มสินค้าในร้าน</button><button class="btn ghost sm" id="addStayBtn" onclick="stayProductSheet()">${ic('home', 16)}เพิ่มที่พัก</button></div>` : ''}
-        ${u.products.length ? `<div class="pgrid">${u.products.map(p => { const sy = p.kind === 'stay'; return `<div class="pcard"><div class="img" style="${p.photos[0] ? `background-image:url('${esc(p.photos[0])}')` : ''}">${p.photos[0] ? '' : `<div style="display:grid;place-items:center;height:100%;color:var(--tq-d)">${ic(sy ? 'home' : 'box', 40)}</div>`}<span class="badge b-green">${sy ? '🏠 ที่พัก' : p.deliveries.map(x => (DLV[x] || ['?'])[0]).join(' ')}</span></div>
-          <div class="b"><div class="t">${esc(p.title)}</div><div class="p">${baht(p.price)}${sy ? '<span class="small muted" style="font-weight:400"> /คืน</span>' : ''}</div>
-          ${mine ? `<button class="btn ghost sm" onclick="delProduct(this,${p.id})">${sy ? 'ซ่อนที่พัก' : 'ซ่อนสินค้า'}</button>` : `<button class="btn primary sm" onclick="buySheet(${p.id})">${sy ? 'จองแบบปลอดภัย' : 'ซื้อแบบปลอดภัย'}</button>`}</div></div>`; }).join('')}</div>`
-          : `<div class="empty-st">${mine ? 'ยังไม่มีสินค้า เพิ่มสินค้าเพื่อให้ลูกค้ากดซื้อแบบปลอดภัยได้เลย' : 'ร้านนี้ยังไม่มีสินค้า'}</div>`}</div>
+      ${shopGoodsCard(u, mine)}
+      ${shopStaysCard(u, mine)}
       ${reviewsBlock(u, u.reviews_top, 'seller', u.products.some(p => p.kind === 'stay') ? 'รีวิวจากลูกค้า' : 'รีวิวจากผู้ซื้อ')}
       ${mine ? noteHtml('info', 'แชร์ลิงก์หน้าร้านในโพสต์ Facebook / LINE ได้เลย ลูกค้ากด “ซื้อแบบปลอดภัย” แล้วจ่ายผ่านระบบพักเงิน') : ''}
+    </div>`;
+}
+const SHOP_PREVIEW = 4;
+function shopGoods(u) { return (u.products || []).filter(p => (p.kind || 'goods') !== 'stay'); }
+function shopStays(u) { return (u.products || []).filter(p => p.kind === 'stay'); }
+function shopProductCard(p, mine, compact) {
+  const sy = p.kind === 'stay';
+  const sold = !sy && p.sold_count > 0 ? `<div class="sold">ขายแล้ว ${fmt(p.sold_count)} ครั้ง</div>` : '';
+  const imgH = compact ? 22 : 40;
+  return `<div class="pcard${compact ? ' sm' : ''}" data-pid="${p.id}">
+    <div class="img" style="${p.photos[0] ? `background-image:url('${esc(p.photos[0])}')` : ''}">${p.photos[0] ? '' : `<div style="display:grid;place-items:center;height:100%;color:var(--tq-d)">${ic(sy ? 'home' : 'box', imgH)}</div>`}
+      <span class="badge b-green">${sy ? '🏠 ที่พัก' : (p.deliveries || []).map(x => (DLV[x] || ['?'])[0]).join(' ')}</span></div>
+    <div class="b"><div class="t">${esc(p.title)}</div>
+      <div class="p">${baht(p.price)}${sy ? '<span class="small muted" style="font-weight:400"> /คืน</span>' : ''}</div>${sold}
+      ${mine ? `<button class="btn ghost sm" onclick="delProduct(this,${p.id})">${sy ? 'ซ่อนที่พัก' : 'ซ่อนสินค้า'}</button>`
+             : `<button class="btn primary sm" onclick="buySheet(${p.id})">${sy ? 'จองแบบปลอดภัย' : 'ซื้อแบบปลอดภัย'}</button>`}</div></div>`;
+}
+function shopGoodsCard(u, mine) {
+  const goods = shopGoods(u), n = goods.length, show = goods.slice(0, SHOP_PREVIEW);
+  return `<div class="card" id="shopGoods">
+    <h3>สินค้าขายประจำ ${n ? `<span class="muted small" style="font-weight:400;margin-left:auto">${fmt(n)} รายการ</span>` : ''}</h3>
+    <p class="shop-sub">สินค้าที่ร้านขายเป็นประจำ กดสร้างดีลได้เลย</p>
+    ${mine ? `<div class="twobtn" style="margin-bottom:10px"><button class="btn ghost sm" id="addGoodsBtn" onclick="productSheet()">${ic('plus', 16)}เพิ่มสินค้าขายประจำ</button></div>` : ''}
+    ${n ? `<div class="pgrid compact">${show.map(p => shopProductCard(p, mine, true)).join('')}</div>
+      ${n > SHOP_PREVIEW ? `<button class="btn ghost sm rv-more" id="seeAllGoods" onclick="location.hash='#/shop/${u.id}/products'">ดูทั้งหมด (${fmt(n)})</button>` : ''}`
+      : `<div class="empty-st">${mine ? 'ยังไม่มีสินค้าขายประจำ เพิ่มไว้เพื่อให้ลูกค้าสั่งซื้อแบบปลอดภัยได้ง่ายขึ้น' : 'ร้านนี้ยังไม่มีสินค้าขายประจำ'}</div>`}</div>`;
+}
+function shopStaysCard(u, mine) {
+  const stays = shopStays(u), n = stays.length, show = stays.slice(0, SHOP_PREVIEW);
+  if (!n && !mine) return '';
+  return `<div class="card" id="shopStays">
+    <h3>ที่พักในร้าน ${n ? `<span class="muted small" style="font-weight:400;margin-left:auto">${fmt(n)} รายการ</span>` : ''}</h3>
+    <p class="shop-sub">จองผ่านระบบพักเงิน กันที่พักปลอม</p>
+    ${mine ? `<div class="twobtn" style="margin-bottom:10px"><button class="btn ghost sm" id="addStayBtn" onclick="stayProductSheet()">${ic('home', 16)}เพิ่มที่พัก</button></div>` : ''}
+    ${n ? `<div class="pgrid compact">${show.map(p => shopProductCard(p, mine, true)).join('')}</div>
+      ${n > SHOP_PREVIEW ? `<button class="btn ghost sm rv-more" id="seeAllStays" onclick="location.hash='#/shop/${u.id}/stays'">ดูทั้งหมด (${fmt(n)})</button>` : ''}`
+      : `<div class="empty-st">${mine ? 'ยังไม่มีที่พักในร้าน กดเพิ่มที่พักเพื่อให้ลูกค้าจองแบบปลอดภัยได้' : ''}</div>`}</div>`;
+}
+async function vShopCatalog(id, kind) {
+  const u = await api('/shops/' + encodeURIComponent(id)); S.shop = u;
+  const mine = S.me && S.me.id === u.id;
+  const list = kind === 'stay' ? shopStays(u) : shopGoods(u);
+  const title = kind === 'stay' ? 'ที่พักทั้งหมด' : 'สินค้าขายประจำทั้งหมด';
+  const sub = kind === 'stay' ? 'จองผ่านระบบพักเงินได้ทุกห้อง' : 'สินค้าที่ร้านขายเป็นประจำ กดสร้างดีลได้เลย';
+  $('#view').innerHTML = header({title, sub: esc(u.shop_name), back: true}) + `
+    <div class="wrap">
+      <div class="card">
+        <p class="shop-sub" style="margin-top:0">${sub} · ${fmt(list.length)} รายการ</p>
+        ${mine ? (kind === 'stay'
+          ? `<div class="twobtn" style="margin-bottom:10px"><button class="btn ghost sm" onclick="stayProductSheet()">${ic('home', 16)}เพิ่มที่พัก</button></div>`
+          : `<div class="twobtn" style="margin-bottom:10px"><button class="btn ghost sm" onclick="productSheet()">${ic('plus', 16)}เพิ่มสินค้าขายประจำ</button></div>`) : ''}
+        ${list.length ? `<div class="pgrid">${list.map(p => shopProductCard(p, mine, false)).join('')}</div>`
+          : `<div class="empty-st">${mine ? (kind === 'stay' ? 'ยังไม่มีที่พัก' : 'ยังไม่มีสินค้าขายประจำ') : 'ยังไม่มีรายการ'}</div>`}
+      </div>
+      <button class="btn ghost sm" style="width:100%" onclick="location.hash='#/shop/${u.id}'">← กลับหน้าร้าน</button>
     </div>`;
 }
 function buySheet(pid) {
@@ -1388,9 +1444,16 @@ function buySheet(pid) {
 function buySubmit(btn) {
   busy(btn, async () => { const r = await api(`/products/${S.buy.pid}/buy`, {delivery: S.buy.delivery}); closeSheet(); toast('สร้างคำสั่งซื้อแล้ว จ่ายเงินเข้าระบบพักเงินได้เลย'); location.hash = '#/d/' + r.code; });
 }
+function refreshShopView() {
+  const {p, a} = route(), sub = route3();
+  if (p === 'shop' && sub === 'products') return vShopCatalog(a, 'goods');
+  if (p === 'shop' && sub === 'stays') return vShopCatalog(a, 'stay');
+  if (p === 'shop') return vShop(a);
+  return vShop(a);
+}
 function productSheet() {
   S.prod = {photos: [], deliveries: ['parcel'], fee: 'half'};
-  openSheet(`<h2>เพิ่มสินค้าในร้าน</h2>
+  openSheet(`<h2>เพิ่มสินค้าขายประจำ</h2>
     <label class="lb">ชื่อสินค้า</label><input class="input" id="pTitle" maxlength="120" placeholder="เช่น เสื้อวินเทจ ไซซ์ L">
     <label class="lb">ราคา (บาท)</label><div class="price-wrap"><input class="input" id="pPrice" inputmode="numeric" placeholder="0"><span>บาท</span></div>
     <label class="lb">รายละเอียด <span class="opt">(ไม่บังคับ)</span></label><textarea class="input" id="pDesc" maxlength="500"></textarea>
@@ -1414,10 +1477,15 @@ function productSubmit(btn) {
   busy(btn, async () => {
     if (!S.prod.deliveries.length) throw new Error('เลือกวิธีส่งมอบอย่างน้อย 1 แบบ');
     await api('/products', {title: $('#pTitle').value, price: $('#pPrice').value.replace(/,/g, ''), description: $('#pDesc').value, photos: S.prod.photos, deliveries: S.prod.deliveries, fee_payer: S.prod.fee, ship_days: $('#pDays').value});
-    closeSheet(); toast('เพิ่มสินค้าแล้ว ✓'); await vShop(route().a);
+    closeSheet(); toast('เพิ่มสินค้าขายประจำแล้ว ✓'); await refreshShopView();
   });
 }
-function delProduct(btn, id) { if (confirm('ซ่อนสินค้านี้จากหน้าร้าน?')) busy(btn, async () => { await api(`/products/${id}/delete`, {}); toast('ซ่อนสินค้าแล้ว'); await vShop(route().a); }); }
+function delProduct(btn, id) {
+  const p = (S.shop && S.shop.products || []).find(x => x.id === id);
+  const sy = p && p.kind === 'stay';
+  if (!confirm(sy ? 'ซ่อนที่พักนี้จากหน้าร้าน?' : 'ซ่อนสินค้าขายประจำนี้จากหน้าร้าน?')) return;
+  busy(btn, async () => { await api(`/products/${id}/delete`, {}); toast(sy ? 'ซ่อนที่พักแล้ว' : 'ซ่อนสินค้าแล้ว'); await refreshShopView(); });
+}
 
 /* ---------------- profile & account ---------------- */
 async function vUser(id) {

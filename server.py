@@ -1204,6 +1204,16 @@ def api_notifs_read(req, me, b):
 
 def product_view(p):
     d = dict(p); d['photos'] = jl(p['photos']); d['deliveries'] = jl(p['deliveries'])
+    n = q1("SELECT COUNT(*) n FROM deals WHERE product_id=? AND status IN ('completed','partial')", (p['id'],))['n']
+    if not n:  # ข้อมูลตัวอย่างเก่าไม่มี product_id — นับจากรูปในดีลให้โชว์ "ขายแล้ว" ได้
+        frag = None
+        for ph in d['photos'] or []:
+            m = re.search(r'/([a-z0-9-]+)\.(?:svg|jpe?g|png|webp)(?:\?|$)', ph or '', re.I)
+            if m: frag = m.group(1); break
+        if frag:
+            n = q1("SELECT COUNT(*) n FROM deals WHERE seller_id=? AND photos LIKE ? AND status IN ('completed','partial')",
+                   (p['user_id'], '%' + frag + '%'))['n']
+    d['sold_count'] = n or 0
     return d
 
 
@@ -1884,6 +1894,9 @@ if __name__ == '__main__':
             if not q1("SELECT 1 FROM deals WHERE code='DS-REV-0001'"):
                 seed.run_v4(db); db.commit()
                 print('เพิ่มรีวิวตัวอย่าง + ช่องทางโซเชียลตัวอย่างแล้ว (v4)', flush=True)
+            if seed.need_v8(db):
+                seed.run_v8(db); db.commit()
+                print('เพิ่มสินค้าขายประจำตัวอย่างร้านทองแล้ว (v8)', flush=True)
     threading.Thread(target=ticker, daemon=True).start()
     if ADMIN_PASSWORD_GENERATED:
         print(f'[admin] ไม่ได้ตั้ง ADMIN_PASSWORD – สุ่มรหัสผู้ดูแลชั่วคราว: {ADMIN_PASSWORD}', flush=True)

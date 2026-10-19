@@ -30,6 +30,9 @@ def run(db):
         (gold, 'แผ่นเสียงลูกกรุง ชุดสะสม (ตัวอย่าง)', '5 แผ่น ปกสวย แผ่นไม่มีรอยลึก', 750, 'vinyl', ['parcel', 'meet', 'messenger'], 2),
         (gold, 'นาฬิกาไขลานมือสอง (ตัวอย่าง)', 'เดินตรง ล้างเครื่องแล้ว · ราคาเกิน 3,000 ต้องยืนยันตัวตน', 3200, 'watch', ['parcel', 'meet'], 3),
         (gold, 'เลนส์ 50mm f/1.4 (ตัวอย่าง)', 'ใสไม่มีฝ้า · ใช้ทดสอบวงเงินผู้ใช้ใหม่ (เกิน 5,000)', 6500, 'lens', ['parcel', 'meet'], 3),
+        (gold, 'กล่องฟิล์มมือสอง ชุด 5 ม้วน (ตัวอย่าง)', 'ฟิล์มหมดอายุเล็กน้อย · ขายเป็นชุด', 420, 'box-dent', ['parcel', 'messenger'], 2),
+        (gold, 'กระเป๋ากล้องหนังวินเทจ (ตัวอย่าง)', 'หนังแท้ มีรอยตามอายุ · สะพายได้', 980, 'bag', ['parcel', 'meet'], 2),
+        (gold, 'กาแฟคั่วบดดอยวาวี ถุงใหญ่ (ตัวอย่าง)', 'คั่วกลาง · กลิ่นหอม · ถุง 500 กรัม', 320, 'coffee', ['parcel', 'messenger'], 2),
         (silver, 'เสื้อเชิ้ตวินเทจ ลายดอก (ตัวอย่าง)', 'อก 42 · ผ้าคอตตอน', 350, 'shirt', ['parcel', 'messenger'], 2),
         (silver, 'กระเป๋าผ้าแคนวาส (ตัวอย่าง)', 'สีเขียวมิ้นต์ · ใบใหญ่', 590, 'bag', ['parcel', 'meet'], 2),
     ]
@@ -225,3 +228,35 @@ def run_v4(db):
     if host:
         add(host, HOST_GOODS_V4)
         add(host, HOST_STAY_V4, 'stay')
+
+
+# ---- v8: สินค้าขายประจำเพิ่มในร้านทอง (สำหรับฐานข้อมูลเดิมที่มีสินค้าน้อย) ----
+GOLD_V8_EXTRA = [
+    ('กล่องฟิล์มมือสอง ชุด 5 ม้วน (ตัวอย่าง)', 'ฟิล์มหมดอายุเล็กน้อย · ขายเป็นชุด', 420, 'box-dent', ['parcel', 'messenger'], 2),
+    ('กระเป๋ากล้องหนังวินเทจ (ตัวอย่าง)', 'หนังแท้ มีรอยตามอายุ · สะพายได้', 980, 'bag', ['parcel', 'meet'], 2),
+    ('กาแฟคั่วบดดอยวาวี ถุงใหญ่ (ตัวอย่าง)', 'คั่วกลาง · กลิ่นหอม · ถุง 500 กรัม', 320, 'coffee', ['parcel', 'messenger'], 2),
+]
+
+
+def need_v8(db):
+    row = db.execute("SELECT id FROM users WHERE phone='0800000001'").fetchone()
+    if not row: return False
+    n = db.execute("SELECT COUNT(*) FROM products WHERE user_id=? AND active=1 AND COALESCE(kind,'goods')!='stay'", (row[0],)).fetchone()[0]
+    return n < 6
+
+
+def run_v8(db):
+    """เติมสินค้าขายประจำให้ร้านป้าแดง (ทอง) ถ้ายังมีน้อยกว่า 6 ชิ้น"""
+    import json, time
+    rnd = __import__('random').Random(88)
+    now = time.time()
+    DAY = 86400
+    row = db.execute("SELECT id FROM users WHERE phone='0800000001'").fetchone()
+    if not row: return
+    gold = row[0]
+    have = {r[0] for r in db.execute("SELECT title FROM products WHERE user_id=? AND active=1", (gold,))}
+    P = lambda x: json.dumps(['/static/demo/' + x + '.svg'])
+    for title, desc, price, img, dl, days in GOLD_V8_EXTRA:
+        if title in have: continue
+        db.execute('INSERT INTO products(user_id,title,description,price,photos,deliveries,fee_payer,ship_days,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+                   (gold, title, desc, price, P(img), json.dumps(dl), 'half', days, now - rnd.randint(3, 40) * DAY))
