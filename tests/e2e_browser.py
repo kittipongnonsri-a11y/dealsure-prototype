@@ -86,7 +86,7 @@ with sync_playwright() as p:
 
     print('1) ผู้ขายล็อกอิน (OTP แสดงบนจอ)')
     S.goto(BASE + '/'); login(S, 'น้องฝ้าย (ทดสอบ)', '0861' + stamp, first_shots=True)
-    wait_text(S, 'ดีลที่กำลังดำเนินการ'); shot(S, '03-home')
+    wait_text(S, 'ดีลล่าสุด'); shot(S, '03-home')
 
     print('2) ผู้ขายสร้างดีลส่งพัสดุ + รูป → ได้ลิงก์')
     create_deal(S, 'กล้องฟิล์ม Olympus มือสอง (ทดสอบ)', 2500, photo=os.path.join(HERE, 'camera.jpg'))

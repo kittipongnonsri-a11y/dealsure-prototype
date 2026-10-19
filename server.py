@@ -84,11 +84,34 @@ CREATE TABLE IF NOT EXISTS reviews(
 CREATE TABLE IF NOT EXISTS notifications(
   id INTEGER PRIMARY KEY, user_id INTEGER, deal_code TEXT, text TEXT, icon TEXT DEFAULT 'info',
   read INTEGER DEFAULT 0, created_at REAL);
+CREATE TABLE IF NOT EXISTS threads(
+  id INTEGER PRIMARY KEY, kind TEXT NOT NULL, deal_id INTEGER, user_a INTEGER, user_b INTEGER,
+  created_at REAL, last_at REAL);
+CREATE TABLE IF NOT EXISTS messages(
+  id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, sender_id INTEGER, is_admin INTEGER DEFAULT 0,
+  text TEXT, photos TEXT DEFAULT '[]', created_at REAL);
+CREATE TABLE IF NOT EXISTS thread_reads(thread_id INTEGER, user_id INTEGER, last_read_id INTEGER DEFAULT 0,
+  PRIMARY KEY(thread_id, user_id));
+CREATE INDEX IF NOT EXISTS ix_threads_a ON threads(user_a);
+CREATE INDEX IF NOT EXISTS ix_threads_b ON threads(user_b);
+CREATE INDEX IF NOT EXISTS ix_threads_deal ON threads(deal_id, kind);
+CREATE INDEX IF NOT EXISTS ix_msg_thread ON messages(thread_id, id);
 CREATE INDEX IF NOT EXISTS ix_deals_seller ON deals(seller_id);
 CREATE INDEX IF NOT EXISTS ix_deals_buyer ON deals(buyer_id);
 CREATE INDEX IF NOT EXISTS ix_notif_user ON notifications(user_id, read);
 """
 db.executescript(SCHEMA)
+
+
+def _migrate():
+    """เพิ่มคอลัมน์ใหม่ให้ฐานข้อมูลเดิม (ไม่ลบข้อมูล)"""
+    for table, col, typ in (('users', 'avatar', 'TEXT'), ('notifications', 'link', 'TEXT')):
+        if col not in [r[1] for r in db.execute(f'PRAGMA table_info({table})')]:
+            db.execute(f'ALTER TABLE {table} ADD COLUMN {col} {typ}')
+    db.commit()
+
+
+_migrate()
 
 
 class ApiError(Exception):
@@ -132,8 +155,14 @@ def new_code():
         if not q1('SELECT 1 FROM deals WHERE code=?', (c,)): return c
 
 
-def notify(uid, code, text, icon='info'):
-    if uid: ex('INSERT INTO notifications(user_id,deal_code,text,icon,created_at) VALUES(?,?,?,?,?)', (uid, code, text, icon, now()))
+def notify(uid, code, text, icon='info', link=None):
+    if not uid: return
+    if link:  # แชท: รวมเป็นแจ้งเตือนเดียวต่อห้องแชท จนกว่าจะอ่าน (ไม่ให้กระดิ่งรก)
+        old = q1('SELECT id FROM notifications WHERE user_id=? AND link=? AND read=0', (uid, link))
+        if old:
+            ex('UPDATE notifications SET text=?, icon=?, created_at=? WHERE id=?', (text, icon, now(), old['id']))
+            return
+    ex('INSERT INTO notifications(user_id,deal_code,text,icon,created_at,link) VALUES(?,?,?,?,?,?)', (uid, code, text, icon, now(), link))
 
 
 def fmt_baht(x):
@@ -204,7 +233,7 @@ def user_stats(uid):
 def public_user(u, stats=True):
     if not u: return None
     d = dict(id=u['id'], name=u['name'], shop_name=u['shop_name'] or u['name'], shop_bio=u['shop_bio'] or '',
-             initial=initial(u['shop_name'] or u['name']), verified=bool(u['id_verified']),
+             initial=initial(u['shop_name'] or u['name']), verified=bool(u['id_verified']), avatar=u['avatar'] or None,
              member_since=u['created_at'], is_demo=bool(u['is_demo']))
     if stats: d['stats'] = user_stats(u['id'])
     return d
@@ -301,6 +330,9 @@ def deal_view(d, me):
     out['seller'] = public_user(get_user(d['seller_id']))
     out['buyer'] = public_user(get_user(d['buyer_id']))
     out['reviews'] = [dict(r) for r in q('SELECT from_id,to_id,target_role,stars,text,created_at FROM reviews WHERE deal_id=?', (d['id'],))]
+    if party and d['seller_id'] and d['buyer_id']:
+        out['chat_thread_id'] = deal_thread(d, 'deal')['id']
+        if d['disputed_at']: out['team_thread_id'] = deal_thread(d, 'dispute')['id']
     if role == 'seller':
         p = q1('SELECT status, paid_at FROM payouts WHERE deal_id=?', (d['id'],))
         out['payout'] = dict(p) if p else None
@@ -344,6 +376,7 @@ def api_me(req, me, b):
     u = public_user(me)
     u['phone'] = me['phone']
     u['unread'] = q1('SELECT COUNT(*) n FROM notifications WHERE user_id=? AND read=0', (me['id'],))['n']
+    u['chat_unread'] = chat_unread(me['id'])
     return {'user': u}
 
 
@@ -407,6 +440,20 @@ def api_verify_id(req, me, b):
     return {'ok': True}
 
 
+@route('POST', '/api/me/avatar')
+def api_avatar(req, me, b):
+    """เปลี่ยนรูปโปรไฟล์: แอปครอปเป็นสี่เหลี่ยมจัตุรัส (512×512) มาให้แล้ว · remove=true = กลับไปใช้รูปเริ่มต้น"""
+    if b.get('remove'):
+        ex('UPDATE users SET avatar=NULL WHERE id=?', (me['id'],))
+        return {'ok': True, 'avatar': None}
+    img = b.get('image')
+    if isinstance(img, str) and len(img) > 4 * 1024 * 1024: raise ApiError('รูปใหญ่เกินไป ลองรูปอื่น')
+    files = save_files([img], allow=('image',), max_n=1)
+    if not files: raise ApiError('กรุณาเลือกรูป')
+    ex('UPDATE users SET avatar=? WHERE id=?', (files[0], me['id']))
+    return {'ok': True, 'avatar': files[0]}
+
+
 @route('GET', r'/api/users/(\d+)', auth=False)
 def api_user(req, me, b, uid):
     u = get_user(int(uid))
@@ -425,7 +472,7 @@ def api_user(req, me, b, uid):
 
 
 def review_list(uid, role, limit):
-    sql = """SELECT r.stars,r.text,r.created_at,r.target_role,u.name from_name,u.id from_id,d.title
+    sql = """SELECT r.stars,r.text,r.created_at,r.target_role,u.name from_name,u.id from_id,u.avatar from_avatar,d.title
              FROM reviews r JOIN users u ON u.id=r.from_id JOIN deals d ON d.id=r.deal_id WHERE r.to_id=?"""
     a = [uid]
     if role: sql += ' AND r.target_role=?'; a.append(role)
@@ -437,7 +484,7 @@ def review_list(uid, role, limit):
 def api_deals(req, me, b):
     for d in q("SELECT * FROM deals WHERE (seller_id=? OR buyer_id=?) AND status IN ('shipped','delivered')", (me['id'], me['id'])):
         process(d)
-    rows = q("""SELECT d.*, s.name s_name, s.shop_name s_shop, bu.name b_name FROM deals d
+    rows = q("""SELECT d.*, s.name s_name, s.shop_name s_shop, s.avatar s_avatar, bu.name b_name, bu.avatar b_avatar FROM deals d
                 LEFT JOIN users s ON s.id=d.seller_id LEFT JOIN users bu ON bu.id=d.buyer_id
                 WHERE d.seller_id=? OR d.buyer_id=? OR d.creator_id=? ORDER BY COALESCE(d.paid_at,d.created_at) DESC LIMIT 100""",
              (me['id'], me['id'], me['id']))
@@ -445,9 +492,14 @@ def api_deals(req, me, b):
     for r in rows:
         role = 'seller' if r['seller_id'] == me['id'] else 'buyer'
         other = (r['b_name'] if role == 'seller' else (r['s_shop'] or r['s_name']))
+        th = q1("SELECT id FROM threads WHERE deal_id=? AND kind='deal'", (r['id'],))
         out.append(dict(code=r['code'], title=r['title'], price=r['price'], buyer_pay=r['buyer_pay'], status=r['status'],
                         delivery=r['delivery'], role=role, other=other, photo=(jl(r['photos']) or [None])[0],
-                        created_at=r['created_at'], is_demo=bool(r['is_demo'])))
+                        other_avatar=r['b_avatar'] if role == 'seller' else r['s_avatar'],
+                        other_initial=initial(other) if other else None,
+                        created_at=r['created_at'], updated_at=max(x for x in (r['created_at'], r['accepted_at'], r['paid_at'], r['shipped_at'],
+                            r['delivered_at'], r['completed_at'], r['refunded_at'], r['cancelled_at'], r['disputed_at']) if x),
+                        chat_unread=thread_unread(th['id'], me['id']) if th else 0, is_demo=bool(r['is_demo'])))
     p = q1("SELECT COALESCE(SUM(amount),0) s, COUNT(*) n FROM payouts WHERE user_id=? AND status='pending'", (me['id'],))
     return {'deals': out, 'pending_payout': p['s'], 'pending_count': p['n']}
 
@@ -647,8 +699,9 @@ def api_review(req, me, b, code):
 
 @route('GET', '/api/notifications')
 def api_notifs(req, me, b):
-    rows = q('SELECT id,deal_code,text,icon,read,created_at FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 40', (me['id'],))
-    return {'items': [dict(r) for r in rows], 'unread': sum(1 for r in rows if not r['read'])}
+    rows = q('SELECT id,deal_code,text,icon,read,created_at,link FROM notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 40', (me['id'],))
+    unread = q1('SELECT COUNT(*) n FROM notifications WHERE user_id=? AND read=0', (me['id'],))['n']
+    return {'items': [dict(r) for r in rows], 'unread': unread, 'chat_unread': chat_unread(me['id'])}
 
 
 @route('POST', '/api/notifications/read')
@@ -741,6 +794,188 @@ def api_payouts(req, me, b):
     return {'items': [dict(r) for r in rows], 'pending': money(pend)}
 
 
+# ---------------- chat (แชทในดีล · ทักร้าน · ทีมงานคุยในข้อพิพาท) ----------------
+ADMIN_UID = 0  # ใช้แทน "ทีมงาน" ในตาราง thread_reads
+TEAM_NAME = 'ทีมงานดีลชัวร์'
+CHAT_WARN = re.compile(r'(\d[\d\s-]{8,}\d|โอนตรง|โอนนอก|นอกแอป|เลขบัญชี|บัญชีธนาคาร|พร้อมเพย์|promptpay|truemoney|ทรูมันนี่|โอนก่อน)', re.I)
+
+
+def qs(req):
+    from urllib.parse import parse_qs
+    return {k: v[0] for k, v in parse_qs(urlparse(req.path).query).items()}
+
+
+def thread_unread(tid, uid):
+    r = q1('SELECT last_read_id FROM thread_reads WHERE thread_id=? AND user_id=?', (tid, uid))
+    last = r['last_read_id'] if r else 0
+    if uid == ADMIN_UID:
+        return q1('SELECT COUNT(*) n FROM messages WHERE thread_id=? AND id>? AND is_admin=0', (tid, last))['n']
+    return q1('SELECT COUNT(*) n FROM messages WHERE thread_id=? AND id>? AND (sender_id IS NULL OR sender_id!=?)', (tid, last, uid))['n']
+
+
+def chat_unread(uid):
+    return q1("""SELECT COUNT(*) n FROM messages m JOIN threads t ON t.id=m.thread_id
+                 LEFT JOIN thread_reads r ON r.thread_id=t.id AND r.user_id=:u
+                 WHERE (t.user_a=:u OR t.user_b=:u) AND m.id>COALESCE(r.last_read_id,0)
+                 AND (m.sender_id IS NULL OR m.sender_id!=:u)""", {'u': uid})['n']
+
+
+def mark_read(t, uid):
+    last = q1('SELECT COALESCE(MAX(id),0) m FROM messages WHERE thread_id=?', (t['id'],))['m']
+    ex('INSERT INTO thread_reads(thread_id,user_id,last_read_id) VALUES(?,?,?) ON CONFLICT(thread_id,user_id) DO UPDATE SET last_read_id=MAX(last_read_id,excluded.last_read_id)',
+       (t['id'], uid, last))
+    if uid != ADMIN_UID:
+        ex('UPDATE notifications SET read=1 WHERE user_id=? AND link=? AND read=0', (uid, thread_link(t)))
+
+
+def thread_link(t):
+    if t['kind'] == 'dispute':
+        d = q1('SELECT code FROM deals WHERE id=?', (t['deal_id'],))
+        return '#/d/' + d['code'] + '/team'
+    return '#/chat/' + str(t['id'])
+
+
+def get_thread(tid):
+    t = q1('SELECT * FROM threads WHERE id=?', (int(tid),))
+    if not t: raise ApiError('ไม่พบห้องแชทนี้', 404)
+    return t
+
+
+def deal_thread(d, kind, create=True):
+    """ห้องแชทของดีล (kind='deal' ผู้ซื้อ↔ผู้ขาย, kind='dispute' ทีมงาน+ทั้งสองฝ่าย)"""
+    t = q1('SELECT * FROM threads WHERE deal_id=? AND kind=?', (d['id'], kind))
+    if t or not create: return t
+    if not (d['seller_id'] and d['buyer_id']): raise ApiError('แชทได้เมื่ออีกฝ่ายกดรับดีลแล้ว')
+    if kind == 'dispute' and not d['disputed_at']: raise ApiError('ดีลนี้ไม่มีการแจ้งปัญหา')
+    tid = ex('INSERT INTO threads(kind,deal_id,user_a,user_b,created_at,last_at) VALUES(?,?,?,?,?,?)',
+             (kind, d['id'], d['seller_id'], d['buyer_id'], now(), now()))
+    return get_thread(tid)
+
+
+def thread_access(t, me):
+    if not me or me['id'] not in (t['user_a'], t['user_b']): raise ApiError('คุณไม่ได้อยู่ในห้องแชทนี้', 403)
+
+
+def thread_closed(t, d):
+    if t['kind'] == 'dispute': return not d or d['status'] != 'disputed'
+    return False
+
+
+def msg_role(t, d, sender_id, is_admin):
+    if is_admin: return 'admin'
+    if t['kind'] == 'shop': return 'shop' if sender_id == t['user_b'] else 'customer'
+    if d: return 'seller' if sender_id == d['seller_id'] else 'buyer'
+    return None
+
+
+def thread_view(t, viewer, after=0):
+    """viewer = user id หรือ ADMIN_UID"""
+    d = q1('SELECT * FROM deals WHERE id=?', (t['deal_id'],)) if t['deal_id'] else None
+    users = {u['id']: public_user(u, stats=False) for u in q('SELECT * FROM users WHERE id IN (?,?)', (t['user_a'], t['user_b']))}
+    rows = q('SELECT * FROM messages WHERE thread_id=? AND id>? ORDER BY id LIMIT 300', (t['id'], int(after or 0)))
+    msgs = []
+    for m in rows:
+        msgs.append(dict(id=m['id'], text=m['text'] or '', photos=jl(m['photos']), created_at=m['created_at'], is_admin=bool(m['is_admin']),
+                         sender_id=m['sender_id'], mine=(m['is_admin'] if viewer == ADMIN_UID else m['sender_id'] == viewer and not m['is_admin']),
+                         role=msg_role(t, d, m['sender_id'], m['is_admin']),
+                         warn=bool(not m['is_admin'] and CHAT_WARN.search(m['text'] or ''))))
+    out = dict(id=t['id'], kind=t['kind'], users=users, messages=msgs, closed=thread_closed(t, d),
+               last_id=msgs[-1]['id'] if msgs else int(after or 0))
+    if d: out['deal'] = dict(code=d['code'], title=d['title'], status=d['status'], price=d['price'], photo=(jl(d['photos']) or [None])[0],
+                             seller_id=d['seller_id'], buyer_id=d['buyer_id'])
+    if viewer != ADMIN_UID:
+        oid = t['user_b'] if viewer == t['user_a'] else t['user_a']
+        out['other'] = users.get(oid)
+        out['my_role'] = msg_role(t, d, viewer, False)
+    return out
+
+
+def post_message(t, sender, is_admin, b):
+    d = q1('SELECT * FROM deals WHERE id=?', (t['deal_id'],)) if t['deal_id'] else None
+    if not is_admin and thread_closed(t, d): raise ApiError('เรื่องนี้ปิดแล้ว ทีมงานตัดสินเรียบร้อย')
+    text = s_(b.get('text'), 1000)
+    photos = save_files(b.get('photos'), allow=('image',), max_n=4)
+    if not text and not photos: raise ApiError('พิมพ์ข้อความหรือแนบรูปก่อนส่ง')
+    t0 = now()
+    mid = ex('INSERT INTO messages(thread_id,sender_id,is_admin,text,photos,created_at) VALUES(?,?,?,?,?,?)',
+             (t['id'], None if is_admin else sender['id'], 1 if is_admin else 0, text, json.dumps(photos), t0))
+    ex('UPDATE threads SET last_at=? WHERE id=?', (t0, t['id']))
+    snippet = (text[:60] + ('…' if len(text) > 60 else '')) if text else '📷 ส่งรูปภาพ'
+    code = d['code'] if d else None
+    link = thread_link(t)
+    if is_admin:
+        for uid in (t['user_a'], t['user_b']):
+            notify(uid, code, f'{TEAM_NAME}: {snippet}', 'team', link)
+    else:
+        mark_read(t, sender['id'])
+        other = t['user_b'] if sender['id'] == t['user_a'] else t['user_a']
+        if t['kind'] == 'shop' and sender['id'] == t['user_b']: who = sender['shop_name'] or sender['name']
+        elif d and sender['id'] == d['seller_id']: who = sender['shop_name'] or sender['name']
+        else: who = sender['name']
+        where = f' (ข้อพิพาท "{d["title"]}")' if t['kind'] == 'dispute' else (f' · {d["title"]}' if d else ' · ทักจากหน้าร้าน')
+        notify(other, code, f'💬 {who}: {snippet}{where}', 'chat', link)
+    return mid
+
+
+@route('POST', r'/api/deals/([A-Z0-9-]+)/thread')
+def api_deal_thread(req, me, b, code):
+    d = get_deal(code); require_party(d, me)
+    kind = 'dispute' if b.get('kind') == 'dispute' else 'deal'
+    return {'thread_id': deal_thread(d, kind)['id']}
+
+
+@route('POST', r'/api/shops/(\d+)/thread')
+def api_shop_thread(req, me, b, uid):
+    owner = get_user(int(uid))
+    if not owner: raise ApiError('ไม่พบร้านนี้', 404)
+    if owner['id'] == me['id']: raise ApiError('นี่คือร้านของคุณเอง')
+    t = q1("SELECT * FROM threads WHERE kind='shop' AND user_a=? AND user_b=?", (me['id'], owner['id']))
+    if not t:
+        tid = ex("INSERT INTO threads(kind,user_a,user_b,created_at,last_at) VALUES('shop',?,?,?,?)", (me['id'], owner['id'], now(), now()))
+        t = get_thread(tid)
+    return {'thread_id': t['id']}
+
+
+@route('GET', r'/api/threads/(\d+)')
+def api_thread(req, me, b, tid):
+    t = get_thread(tid); thread_access(t, me)
+    out = thread_view(t, me['id'], qs(req).get('after', 0))
+    mark_read(t, me['id'])
+    return out
+
+
+@route('POST', r'/api/threads/(\d+)/messages')
+def api_thread_post(req, me, b, tid):
+    t = get_thread(tid); thread_access(t, me)
+    mid = post_message(t, me, False, b)
+    return {'ok': True, 'id': mid}
+
+
+@route('GET', '/api/chats')
+def api_chats(req, me, b):
+    rows = q("""SELECT t.*, (SELECT MAX(id) FROM messages m WHERE m.thread_id=t.id) last_id FROM threads t
+                WHERE (t.user_a=:u OR t.user_b=:u) AND EXISTS(SELECT 1 FROM messages m WHERE m.thread_id=t.id)
+                ORDER BY t.last_at DESC LIMIT 100""", {'u': me['id']})
+    out = []
+    for t in rows:
+        oid = t['user_b'] if me['id'] == t['user_a'] else t['user_a']
+        o = public_user(get_user(oid), stats=False)
+        d = q1('SELECT code,title,status,seller_id,photos FROM deals WHERE id=?', (t['deal_id'],)) if t['deal_id'] else None
+        m = q1('SELECT * FROM messages WHERE id=?', (t['last_id'],))
+        other_is_shop = (t['kind'] == 'shop' and oid == t['user_b']) or (d and oid == d['seller_id'])
+        if t['kind'] == 'dispute':
+            name, sub = TEAM_NAME, f'ข้อพิพาท · {d["title"]}'
+        else:
+            name = o['shop_name'] if other_is_shop else o['name']
+            sub = d['title'] if d else ('ทักจากหน้าร้าน' if me['id'] == t['user_a'] else 'ลูกค้าทักหน้าร้านของคุณ')
+        who = TEAM_NAME if m['is_admin'] else ('คุณ' if m['sender_id'] == me['id'] else None)
+        out.append(dict(id=t['id'], kind=t['kind'], name=name, sub=sub, other=o, deal_code=d['code'] if d else None,
+                        deal_status=d['status'] if d else None, link=thread_link(t),
+                        last=dict(text=(m['text'] or '📷 รูปภาพ'), who=who, created_at=m['created_at']),
+                        unread=thread_unread(t['id'], me['id'])))
+    return {'items': out, 'unread': chat_unread(me['id'])}
+
+
 # ---------------- admin ----------------
 @route('POST', '/api/admin/login', auth=False)
 def api_admin_login(req, me, b):
@@ -760,7 +995,15 @@ def api_admin_overview(req, me, b):
         x['seller_name'] = (get_user(d['seller_id']) or {'name': '-'})['name'] if d['seller_id'] else '-'
         x['buyer_name'] = (get_user(d['buyer_id']) or {'name': '-'})['name'] if d['buyer_id'] else '-'
         return x
-    disputes = [deal_row(d) for d in q("SELECT * FROM deals WHERE status='disputed' ORDER BY disputed_at")]
+    disputes = []
+    for d in q("SELECT * FROM deals WHERE status='disputed' ORDER BY disputed_at"):
+        x = deal_row(d)
+        t = deal_thread(d, 'dispute')
+        x['thread'] = thread_view(t, ADMIN_UID)
+        x['thread']['unread'] = thread_unread(t['id'], ADMIN_UID)
+        ct = deal_thread(d, 'deal', create=False)
+        x['deal_chat'] = thread_view(ct, ADMIN_UID)['messages'] if ct else []
+        disputes.append(x)
     recent = [deal_row(d) for d in q("SELECT * FROM deals WHERE is_demo=0 ORDER BY id DESC LIMIT 40")]
     pays = [dict(r) for r in q("""SELECT p.*, u.name, d.code FROM payouts p JOIN users u ON u.id=p.user_id JOIN deals d ON d.id=p.deal_id
                                   WHERE p.status='pending' ORDER BY p.id""")]
@@ -768,6 +1011,24 @@ def api_admin_overview(req, me, b):
     held = q1("SELECT COALESCE(SUM(buyer_pay),0) s FROM deals WHERE status IN ('held','shipped','delivered','disputed')")['s']
     return {'disputes': disputes, 'recent': recent, 'payouts': pays, 'ids': ids, 'held_total': held,
             'users': q1('SELECT COUNT(*) n FROM users WHERE is_demo=0')['n']}
+
+
+@route('GET', r'/api/admin/threads/(\d+)', auth=False, admin=True)
+def api_admin_thread(req, me, b, tid):
+    t = get_thread(tid)
+    if t['kind'] != 'dispute': raise ApiError('แอดมินดูได้เฉพาะห้องข้อพิพาท', 403)
+    out = thread_view(t, ADMIN_UID, qs(req).get('after', 0))
+    mark_read(t, ADMIN_UID)
+    return out
+
+
+@route('POST', r'/api/admin/threads/(\d+)/messages', auth=False, admin=True)
+def api_admin_thread_post(req, me, b, tid):
+    t = get_thread(tid)
+    if t['kind'] != 'dispute': raise ApiError('แอดมินส่งได้เฉพาะห้องข้อพิพาท', 403)
+    mid = post_message(t, None, True, b)
+    mark_read(t, ADMIN_UID)
+    return {'ok': True, 'id': mid}
 
 
 @route('POST', r'/api/admin/deals/([A-Z0-9-]+)/resolve', auth=False, admin=True)
@@ -841,7 +1102,9 @@ class H(BaseHTTPRequestHandler):
         for c in getattr(self, '_cookies', []): self.send_header('Set-Cookie', c)
         for k, v in (extra or {}).items(): self.send_header(k, v)
         self.end_headers()
-        if self.command != 'HEAD': self.wfile.write(body)
+        if self.command != 'HEAD':
+            try: self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError): pass  # ผู้ใช้ปิดหน้า/เน็ตหลุดระหว่างส่ง
 
     def do_HEAD(self): self.do_GET()
     def do_GET(self): self.handle_any('GET')

@@ -16,7 +16,7 @@ const DLV = {parcel: ['📦', 'ส่งพัสดุ', 'box'], meet: ['🤝',
 const dlvLabel = k => DLV[k][0] + ' ' + DLV[k][1];
 const FEEP = {buyer: 'ผู้ซื้อจ่าย', seller: 'ผู้ขายจ่าย', half: 'คนละครึ่ง'};
 const hello = n => /^(คุณ|น้อง|พี่|ป้า|ลุง)/.test(n) ? n : 'คุณ' + n;
-const S = {me: null, unread: 0, notifs: [], deal: null, offset: 0, after: null, F: null};
+const S = {me: null, unread: 0, chatUnread: 0, notifs: [], deal: null, offset: 0, after: null, F: null, drafts: {}};
 
 function since(ts) {
   const days = Math.max(0, (Date.now() / 1000 - ts) / 86400);
@@ -115,8 +115,10 @@ function hero(icon, color, line1, line2, badge = '') {
     <div style="flex:1;min-width:0"><div class="small muted">${line1}</div><div class="timer" style="font-size:18px">${line2}</div></div>${badge}</div>`;
 }
 function avatar(u, size = '', check = true) {
-  return `<div class="avatar ${size}">${esc(u.initial)}${u.verified && check ? `<span class="v">${ic('check', 12, 'color:#fff')}</span>` : ''}</div>`;
+  const img = u && u.avatar;
+  return `<div class="avatar ${size}${img ? ' has-img' : ''}"${img ? ` style="--img:url('${esc(img)}')"` : ''} role="img" aria-label="รูปโปรไฟล์ ${esc(u.name || '')}">${img ? '' : esc(u.initial)}${u.verified && check ? `<span class="v">${ic('check', 12, 'color:#fff')}</span>` : ''}</div>`;
 }
+const teamAvatar = (size = 'xs') => `<div class="avatar ${size} team" role="img" aria-label="ทีมงานดีลชัวร์"><svg viewBox="0 0 1024 1024"><use href="#logoA"/></svg></div>`;
 function levelBadge(st) {
   if (st.level === 'gold') return '<span class="badge b-gold">★ ร้านทอง</span>';
   if (st.level === 'silver') return '<span class="badge b-silver">☆ ร้านเงิน</span>';
@@ -164,13 +166,15 @@ function route() { const h = location.hash.replace(/^#\/?/, ''); const [p, a] = 
 let navDepth = 0;
 function goBack() { if (navDepth > 0) history.back(); else location.hash = '#/'; }
 const PUBLIC = ['login', 'd', 'shop', 'u'];
+const route3 = () => location.hash.replace(/^#\/?/, '').split('/')[2] || '';
 async function render() {
   const {p, a} = route();
   closeSheet(); toggleNotif(false); S.deal = null;
   if (!S.me && !PUBLIC.includes(p)) { S.after = location.hash; location.hash = '#/login'; return; }
-  const tabs = {home: 'home', create: 'create', myshop: 'shop', me: 'me'};
-  $('#tabbar').classList.toggle('hidden', !S.me || p === 'login');
+  const tabs = {home: 'home', create: 'create', myshop: 'shop', me: 'me', chats: 'chats', chat: 'chats'};
+  $('#tabbar').classList.toggle('hidden', !S.me || p === 'login' || p === 'chat');
   $('#app').classList.toggle('notabs', !S.me || p === 'login');
+  $('#app').classList.toggle('chatfull', p === 'chat');
   $$('.tab').forEach(t => t.classList.toggle('on', t.dataset.t === (tabs[p] || (p === 'shop' && S.me && a == S.me.id ? 'shop' : ''))));
   const v = $('#view');
   try {
@@ -182,26 +186,32 @@ async function render() {
     else if (p === 'myshop') { location.replace('#/shop/' + S.me.id); return; }
     else if (p === 'u') await vUser(a);
     else if (p === 'me') await vMe();
+    else if (p === 'chats') await vChats();
+    else if (p === 'chat') await vChat(a);
     else location.hash = '#/';
   } catch (e) {
     v.innerHTML = header({title: 'ขออภัย', back: true}) + `<div class="wrap"><div class="card">${noteHtml('err', esc(e.message))}<a class="btn ghost" href="#/">กลับหน้าหลัก</a></div></div>`;
   }
-  window.scrollTo(0, 0);
+  if (p === 'chat') scrollChatBottom(); else if (p === 'd' && route3() === 'team' && $('#teamCard')) $('#teamCard').scrollIntoView(); else window.scrollTo(0, 0);
 }
 async function loadMe() {
-  const r = await api('/me'); S.me = r.user; S.unread = r.user ? r.user.unread : 0; updateDots();
+  const r = await api('/me'); S.me = r.user; S.unread = r.user ? r.user.unread : 0; S.chatUnread = r.user ? r.user.chat_unread : 0; updateDots();
 }
 function updateDots() {
   $$('.top .icon-btn .dot').forEach(d => d.remove());
   const b = $('.top .icon-btn[aria-label="การแจ้งเตือน"]');
   if (b && S.unread) b.insertAdjacentHTML('beforeend', `<span class="dot">${S.unread > 9 ? '9+' : S.unread}</span>`);
   $('#tdot') && $('#tdot').classList.toggle('hidden', !S.unread);
+  const cb = $('#chatBadge');
+  if (cb) { cb.textContent = S.chatUnread > 9 ? '9+' : S.chatUnread; cb.classList.toggle('hidden', !S.chatUnread); }
 }
 
 /* ---------------- notifications ---------------- */
 const NIC = {box: ['#FFF4DB', 'var(--amber)'], truck: ['var(--tq-l)', 'var(--tq-t)'], lock: ['var(--tq-l)', 'var(--tq-t)'], wallet: ['var(--tq-l)', 'var(--tq-t)'],
   warn: ['var(--red-l)', 'var(--red)'], star: ['#FFF0CC', '#8A5A00'], check: ['var(--tq-l)', 'var(--tq-t)'], store: ['#FFEDE5', '#C2410C'],
-  bike: ['#FFF4DB', 'var(--amber)'], shield: ['var(--tq-l)', 'var(--tq-t)'], info: ['var(--tq-l)', 'var(--tq-t)']};
+  bike: ['#FFF4DB', 'var(--amber)'], shield: ['var(--tq-l)', 'var(--tq-t)'], info: ['var(--tq-l)', 'var(--tq-t)'],
+  chat: ['#EAF6F2', 'var(--tq-t)'], team: ['var(--tq-t)', '#fff']};
+const NSYM = {team: 'shield'};
 async function toggleNotif(v) {
   const n = $('#notif'); const open = v === undefined ? !n.classList.contains('open') : v;
   n.classList.toggle('open', open);
@@ -213,12 +223,14 @@ async function toggleNotif(v) {
     if (r.unread) { await api('/notifications/read', {}); S.unread = 0; updateDots(); }
   } catch (e) { handleErr(e); }
 }
+function goHash(h) { if (location.hash === h) render(); else location.hash = h; }
 function renderNotif() {
   const n = $('#notif');
   n.innerHTML = `<div class="h">การแจ้งเตือน <button class="link" onclick="toggleNotif(false)">ปิด</button></div>` +
     (S.notifs.length ? S.notifs.map(x => { const [bg, c] = NIC[x.icon] || NIC.info;
-      return `<div class="it ${x.read ? '' : 'unread'}" onclick="${x.deal_code ? `toggleNotif(false);location.hash='#/d/${esc(x.deal_code)}'` : 'toggleNotif(false)'}">
-      <div class="ic" style="background:${bg};color:${c}">${ic(x.icon in NIC && x.icon !== 'info' ? x.icon : 'info', 16)}</div>
+      const to = x.link || (x.deal_code ? '#/d/' + x.deal_code : '');
+      return `<div class="it ${x.read ? '' : 'unread'}" onclick="toggleNotif(false);${to ? `goHash('${esc(to)}')` : ''}">
+      <div class="ic" style="background:${bg};color:${c}">${ic(NSYM[x.icon] || (x.icon in NIC && x.icon !== 'info' ? x.icon : 'info'), 16)}</div>
       <div>${esc(x.text)}<small>${ago(x.created_at)}</small></div></div>`; }).join('') : '<div class="empty">ยังไม่มีการแจ้งเตือน</div>');
 }
 
@@ -276,12 +288,21 @@ async function logout() { await api('/logout', {}); S.me = null; S.unread = 0; l
 
 /* ---------------- home ---------------- */
 async function vHome() {
-  const [r, sh] = await Promise.all([api('/deals'), api('/shops')]);
+  const [r, sh] = await Promise.all([api('/deals'), api('/shops'), pollCounts()]);
   const act = r.deals.filter(d => ACTIVE.includes(d.status)), done = r.deals.filter(d => !ACTIVE.includes(d.status));
-  const row = d => `<a class="dl" href="#/d/${esc(d.code)}">${thumb(d.photo)}
-     <div class="grow"><b class="ell" style="display:block">${esc(d.title)}</b>
-     <div class="small muted ell">${d.role === 'seller' ? 'คุณขาย' : 'คุณซื้อ'}${d.other ? ' · กับ ' + esc(d.other) : ' · รออีกฝ่าย'} · ${DLV[d.delivery][0]}</div>
-     <div class="row2" style="margin-top:3px"><span class="price-tq">${baht(d.price)}</span>${stLabel(d.status, d.role)}</div></div></a>`;
+  const row = d => `<a class="dcard" href="#/d/${esc(d.code)}">
+     <div class="dc-head">${thumb(d.photo)}
+       <div class="grow"><div class="dc-title">${esc(d.title)}</div>
+         <div class="dc-role">${d.role === 'seller' ? 'คุณเป็นผู้ขาย' : 'คุณเป็นผู้ซื้อ'} · ${dlvLabel(d.delivery)}</div></div>
+       ${d.chat_unread ? `<span class="dc-chat" aria-label="ข้อความใหม่ ${d.chat_unread}">${ic('chat', 15)}${d.chat_unread > 9 ? '9+' : d.chat_unread}</span>` : ''}</div>
+     <div class="dc-rows">
+       <div class="dc-row"><span class="k">ราคา</span><span class="dc-price">${baht(d.price)}</span></div>
+       <div class="dc-row"><span class="k">สถานะ</span>${stLabel(d.status, d.role)}</div>
+       <div class="dc-row"><span class="k">${d.role === 'seller' ? 'ผู้ซื้อ' : 'ผู้ขาย'}</span>${d.other
+         ? `<span class="dc-who">${avatar({name: d.other, initial: d.other_initial, avatar: d.other_avatar}, 'xs', false)}<span>${esc(d.other)}</span></span>`
+         : '<span class="muted">รออีกฝ่ายกดรับดีล</span>'}</div>
+       <div class="dc-row"><span class="k">อัปเดต</span><span>${dShort(d.updated_at || d.created_at)}</span></div>
+     </div></a>`;
   const shops = sh.shops.slice(0, 3).map(s => `<div class="shoprow" onclick="location.hash='#/shop/${s.id}'">${avatar(s, 'sm')}
      <div class="grow"><b class="prompt ell" style="display:block">${esc(s.shop_name)}</b>
      <div class="row2" style="flex-wrap:wrap;gap:4px">${levelBadge(s.stats)}<span class="small muted">${s.stats.rating ? '★ ' + s.stats.rating.toFixed(1) : 'ยังไม่มีรีวิว'} · ขายสำเร็จ ${fmt(s.stats.sales)}</span></div></div>
@@ -290,11 +311,10 @@ async function vHome() {
       hero: `<a href="#/me" style="text-decoration:none">${hero('wallet', 'var(--tq)', 'เงินขาย รอโอนรอบถัดไป (วันละครั้ง)', baht(r.pending_payout), '<span class="badge b-green">จำลอง</span>')}</a>`}) + `
     <div class="wrap">
       <a class="btn primary" href="#/create">${ic('plus', 20)}สร้างดีลใหม่ & ส่งลิงก์</a>
-      <div class="card mt12">
-        <h3>${ic('list', 18)}ดีลที่กำลังดำเนินการ <span class="muted small" style="font-weight:400;margin-left:auto">${act.length} ดีล</span></h3>
-        ${act.length ? act.map(row).join('') : `<div class="empty-st"><div class="big">🤝</div>ยังไม่มีดีล ลองสร้างดีลแล้วส่งลิงก์ให้อีกฝ่ายทาง LINE ดูสิ</div>`}
-      </div>
-      ${done.length ? `<div class="card"><h3>ดีลที่จบแล้ว</h3>${done.map(row).join('')}</div>` : ''}
+      ${S.chatUnread ? `<a class="chat-cta mt12" href="#/chats">${ic('chat', 20)}<span class="grow">มีข้อความใหม่ ${S.chatUnread} ข้อความ</span><span class="link">เปิดแชท →</span></a>` : ''}
+      <h3 class="sec-h">${ic('list', 18)}ดีลล่าสุด · กำลังดำเนินการ <span class="muted small">${act.length} ดีล</span></h3>
+      ${act.length ? `<div class="dcards">${act.map(row).join('')}</div>` : `<div class="card"><div class="empty-st"><div class="big">🤝</div>ยังไม่มีดีล ลองสร้างดีลแล้วส่งลิงก์ให้อีกฝ่ายทาง LINE ดูสิ</div></div>`}
+      ${done.length ? `<h3 class="sec-h">${ic('check', 18)}ดีลที่จบแล้ว <span class="muted small">${done.length} ดีล</span></h3><div class="dcards">${done.map(row).join('')}</div>` : ''}
       ${shops ? `<div class="card"><h3>${ic('store', 18)}ร้านแนะนำ</h3>${shops}</div>` : ''}
       ${noteHtml('info', '<b>โหมดทดลอง – ไม่มีเงินจริง</b> การจ่ายเงิน การโอน และการยืนยันตัวตนทั้งหมดเป็นการจำลอง ใช้ปุ่ม “เร่งเวลา (ทดสอบ)” ในหน้าดีลเพื่อข้ามเวลารอได้')}
     </div>`;
@@ -535,6 +555,12 @@ async function vDeal(code) {
       <div class="mt12">${RES[d.resolution] ? noteHtml('ok', `<b>ผลการตัดสิน:</b> ${RES[d.resolution]}${d.resolution_note ? '<br>' + esc(d.resolution_note) : ''}`) : st === 'disputed' ? noteHtml('warn', 'ทีมงานกำลังตรวจสอบหลักฐานจากทั้งสองฝ่าย ระหว่างนี้เงินจะถูกพักไว้ ไม่โอนให้ผู้ขาย') : ''}</div></div>`;
   }
 
+  let team = '', chat = '';
+  if (d.team_thread_id) team = `<div class="card team-card" id="teamCard"><h3>${teamAvatar('xs')}ข้อความจากทีมงานดีลชัวร์ <span class="badge b-team" style="margin-left:auto">${ic('shield', 12)}ทีมงาน</span></h3>
+      <p class="small muted">${st === 'disputed' ? 'ทีมงานจะคุยกับทั้งผู้ซื้อและผู้ขายในห้องนี้ ทั้งสองฝ่ายเห็นข้อความเดียวกัน ตอบกลับหรือแนบรูปหลักฐานเพิ่มได้' : 'เรื่องนี้ปิดแล้ว (อ่านย้อนหลังได้)'}</p>
+      <div data-thread="${d.team_thread_id}" data-mode="team"></div></div>`;
+  if (d.chat_thread_id) chat = `<div class="card" id="chatCard"><h3>${ic('chat', 18)}แชทกับ${role === 'seller' ? 'ผู้ซื้อ' : 'ผู้ขาย'} <a class="link" style="margin-left:auto;font-weight:600" href="#/chat/${d.chat_thread_id}">เต็มจอ ↗</a></h3>
+      <div data-thread="${d.chat_thread_id}" data-mode="inline"></div></div>`;
   const sum = `<div class="card sum"><h3>สรุปดีล <span class="muted small" style="font-weight:400;margin-left:auto">#${esc(d.code)}</span></h3>
     <div class="prod">${thumb(d.photos[0])}<div class="grow"><b>${esc(d.title)}</b>${d.is_demo ? ' <span class="demo">ตัวอย่าง</span>' : ''}<div class="small muted">${esc(d.description || '')}</div></div></div>
     ${d.photos.length > 1 ? `<div class="gallery" style="margin-bottom:6px">${d.photos.map(p => `<a href="${esc(p)}" target="_blank"><img src="${esc(p)}" alt="รูปสินค้า"></a>`).join('')}</div>` : ''}
@@ -560,11 +586,11 @@ async function vDeal(code) {
       ${d.skew ? `<div class="skewnote">⏩ ดีลนี้เร่งเวลาไปแล้ว ${durShort(d.skew)} · เวลาในดีลตอนนี้: ${dFull(d.deal_now)}</div>` : ''}</div>` : '';
 
   $('#view').innerHTML = header({title: `ดีล <small>#${esc(d.code)}</small>`, sub: `${esc(d.title)} · ${amt}`, back: true, hero: H}) +
-    `<div class="wrap">${ac}${partyCard}${disp}${sum}${protect}${timeline(d)}${dealReviews(d)}${test}
+    `<div class="wrap">${ac}${disp}${team}${partyCard}${chat}${sum}${protect}${timeline(d)}${dealReviews(d)}${test}
      ${st === 'open' && role ? `<div class="twobtn"><button class="btn ghost sm" onclick="shareSheet(S.deal.code,'${role}',S.deal.title,S.deal.buyer_pay)">${ic('share', 16)}แชร์ลิงก์</button><button class="btn danger sm" onclick="cancelDeal(this)">ยกเลิกดีล</button></div>` : ''}
      ${st === 'accepted' && role ? `<button class="btn danger sm" onclick="cancelDeal(this)">ยกเลิกดีล (ก่อนจ่ายเงิน)</button>` : ''}
      <p class="footer-note">แจ้งปัญหาได้ภายใน 3 วันหลังของถึง · แนบคลิปแกะกล่องเพื่อใช้เป็นหลักฐาน</p></div>`;
-  updateDots();
+  updateDots(); mountThreads();
   if (S.pendingShare && S.pendingShare.code === d.code) { const p = S.pendingShare; S.pendingShare = null; shareSheet(p.code, p.role, p.title, p.amount, true); }
 }
 function timeline(d) {
@@ -757,7 +783,7 @@ function reviewsCard(u, list, title = 'รีวิวจากผู้ซื�
   return `<div class="card"><h3>${title}</h3>${tot ? `<div style="display:flex;gap:14px;align-items:center;margin-bottom:6px">
       <div style="text-align:center"><div class="prompt" style="font-size:34px;font-weight:700;color:var(--navy);line-height:1">${s.rating.toFixed(1)}</div>${stars(s.rating, 12)}<div class="small muted">${fmt(tot)} รีวิว</div></div>
       <div class="bars" style="flex:1">${[5, 4, 3, 2, 1].map(n => `<div class="r">${n}<div class="bar"><i style="width:${(100 * (s.rating_dist[n] || 0) / tot).toFixed(1)}%"></i></div></div>`).join('')}</div></div>` : ''}
-    ${list.length ? list.map(r => `<div class="rev"><div class="h"><div class="who"><span class="mini" style="background:${r.from_id % 2 ? '#14B8A6' : '#F59E0B'}">${esc([...r.from_name][0])}</span>${esc(r.from_name)}</div>${stars(r.stars, 12)}</div>${r.text ? `<p>${esc(r.text)}</p>` : ''}<div class="small muted">${r.target_role === 'buyer' ? 'รีวิวในฐานะผู้ซื้อ · ' : ''}${esc(r.title)} · ${ago(r.created_at)}</div></div>`).join('') : '<div class="empty-st">ยังไม่มีรีวิว</div>'}</div>`;
+    ${list.length ? list.map(r => `<div class="rev"><div class="h"><div class="who">${r.from_avatar ? `<span class="mini img" style="background-image:url('${esc(r.from_avatar)}')"></span>` : `<span class="mini" style="background:${r.from_id % 2 ? '#14B8A6' : '#F59E0B'}">${esc([...r.from_name][0])}</span>`}${esc(r.from_name)}</div>${stars(r.stars, 12)}</div>${r.text ? `<p>${esc(r.text)}</p>` : ''}<div class="small muted">${r.target_role === 'buyer' ? 'รีวิวในฐานะผู้ซื้อ · ' : ''}${esc(r.title)} · ${ago(r.created_at)}</div></div>`).join('') : '<div class="empty-st">ยังไม่มีรีวิว</div>'}</div>`;
 }
 async function vShop(id) {
   const u = await api('/shops/' + encodeURIComponent(id)); S.shop = u;
@@ -768,12 +794,13 @@ async function vShop(id) {
       <button class="icon-btn" aria-label="แชร์ร้าน" onclick="copyText(location.origin+'/s/${u.id}','คัดลอกลิงก์ร้านแล้ว ✓')">${ic('share', 20)}</button></div></div>
     <div class="shophead card" style="margin:-44px 14px 12px">
       <div style="display:flex;gap:12px;align-items:flex-end;margin-top:-40px">
-        <div class="avatar" style="width:76px;height:76px;font-size:30px;border:4px solid #fff">${esc(u.initial)}${u.verified ? `<span class="v" style="width:26px;height:26px;border-radius:13px">${ic('check', 14, 'color:#fff')}</span>` : ''}</div>
+        ${avatar(u, 'xl')}
         <div style="padding-bottom:2px">${s.level === 'gold' ? '<span class="badge b-gold" style="font-size:12.5px;padding:3px 10px">🏆 ร้านทอง</span>' : levelBadge(s)}</div></div>
       <div style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap"><h2 style="font-size:19px;font-weight:600">${esc(u.shop_name)}</h2>${u.is_demo ? '<span class="demo">ร้านตัวอย่าง</span>' : ''}</div>
       <div class="small muted">${esc(u.shop_bio || 'เจ้าของร้าน: ' + u.name)}</div>
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${u.verified ? `<span class="badge b-green">${ic('shield', 12)}ร้านยืนยันตัวตนแล้ว</span>` : '<span class="badge b-silver">ยังไม่ยืนยันตัวตน</span>'}
         <span class="badge b-blue"><span class="stars" style="font-size:11px">★</span>${s.rating ? s.rating.toFixed(1) + ' (' + fmt(s.reviews) + ' รีวิว)' : 'ยังไม่มีรีวิว'}</span></div>
+      ${mine ? '' : `<div class="twobtn mt12"><button class="btn primary sm" id="chatShopBtn" onclick="chatShop(this,${u.id})">${ic('chat', 18)}ทักร้าน</button><button class="btn ghost sm" onclick="copyText(location.origin+'/s/${u.id}','คัดลอกลิงก์ร้านแล้ว ✓')">${ic('share', 16)}แชร์ร้าน</button></div>`}
       <div class="levels">${lv('new')}${lv('silver')}${lv('gold')}</div>
       <details class="rules"><summary>ระดับร้านคิดยังไง? · วงเงินตอนนี้ ${fmt(s.seller_limit)} ฿/ดีล</summary>
         <table><tr><th>ระดับ</th><th>ดีลสำเร็จ</th><th>ดาว</th><th>ข้อพิพาท</th><th>วงเงิน/ดีล</th></tr>
@@ -870,10 +897,11 @@ async function vUser(id) {
 async function vMe() {
   const [pay] = await Promise.all([api('/payouts'), loadMe()]); const u = S.me, s = u.stats;
   $('#view').innerHTML = header({title: 'บัญชีของฉัน', sub: 'โปรไฟล์ · ยืนยันตัวตน · เงินที่รอโอน'}) + `<div class="wrap">
-    <div class="card"><div class="seller">${avatar(u)}<div class="grow"><b class="prompt" style="font-size:17px">${esc(u.name)}</b><div class="small muted">${esc(u.phone)}</div>
+    <div class="card"><div class="seller"><button class="av-edit" id="avEdit" aria-label="เปลี่ยนรูปโปรไฟล์" onclick="avatarPick()">${avatar(u, 'lg')}<span class="cam">${ic('camera', 15)}</span></button><div class="grow"><b class="prompt" style="font-size:17px">${esc(u.name)}</b><div class="small muted">${esc(u.phone)}</div>
       <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">${verBadge(u)}${levelBadge(s)}</div></div></div>
       <div class="stats"><div class="stat"><b>${fmt(s.sales)}</b><span>ขายสำเร็จ</span></div><div class="stat"><b>${fmt(s.buys)}</b><span>ซื้อสำเร็จ</span></div><div class="stat"><b>${s.rating ? '★ ' + s.rating.toFixed(1) : '–'}</b><span>ดาวผู้ขาย</span></div></div>
-      <div class="twobtn mt12"><a class="btn ghost sm" href="#/u/${u.id}">โปรไฟล์สาธารณะ</a><a class="btn ghost sm" href="#/shop/${u.id}">หน้าร้านของฉัน</a></div></div>
+      <div class="twobtn mt12"><button class="btn ghost sm" onclick="avatarPick()">${ic('camera', 16)}เปลี่ยนรูปโปรไฟล์</button>${u.avatar ? `<button class="btn ghost sm" onclick="avatarRemove(this)">ใช้รูปเริ่มต้น</button>` : `<a class="btn ghost sm" href="#/chats">${ic('chat', 16)}แชทของฉัน</a>`}</div>
+      <div class="twobtn mt8"><a class="btn ghost sm" href="#/u/${u.id}">โปรไฟล์สาธารณะ</a><a class="btn ghost sm" href="#/shop/${u.id}">หน้าร้านของฉัน</a></div></div>
     <div class="card"><h3>${ic('wallet', 18)}เงินขายของฉัน</h3>
       <div class="row2"><div class="grow"><div class="small muted">รอโอนรอบถัดไป (วันละครั้ง 18:00 น.)</div><b class="prompt" style="font-size:22px;color:var(--tq-t)">${baht(pay.pending)}</b></div><span class="badge b-green">จำลอง</span></div>
       ${pay.items.length ? pay.items.slice(0, 8).map(p => `<div class="hist"><a class="grow ell" href="#/d/${p.code}">${esc(p.title)}</a><div style="text-align:right"><b class="small">${baht(p.amount)}</b><br>${p.status === 'pending' ? '<span class="spill sp-wait">รอโอนรอบถัดไป (วันละครั้ง)</span>' : '<span class="spill sp-done">โอนแล้ว (จำลอง)</span>'}</div></div>`).join('') : '<p class="small muted mt8">ยังไม่มีเงินขาย</p>'}
@@ -893,6 +921,202 @@ async function vMe() {
 }
 function saveMe(btn) { busy(btn, async () => { await api('/me/update', {name: $('#meName').value, shop_name: $('#meShop').value, shop_bio: $('#meBio').value}); toast('บันทึกแล้ว ✓'); await vMe(); }); }
 
+/* ---------------- chat (แชทในดีล · ทักร้าน · ห้องทีมงาน) ---------------- */
+const TH = {};
+const SAFE_NOTE = '🔒 <b>จ่ายเงินผ่านดีลชัวร์เท่านั้น</b> อย่าโอนเงินนอกแอปหรือโอนตรงเข้าบัญชีใคร ถ้าจ่ายนอกแอป เราคุ้มครองเงินให้ไม่ได้';
+const ROLE_TH = {seller: 'ผู้ขาย', buyer: 'ผู้ซื้อ', shop: 'ร้านค้า', customer: 'ลูกค้า', admin: 'ทีมงาน'};
+async function loadThread(id) {
+  const t = TH[id] || (TH[id] = {msgs: [], last: 0, pending: [], meta: null});
+  if (t.loading) return t.loading;
+  t.loading = (async () => {
+    try {
+      const r = await api(`/threads/${id}?after=${t.last}`);
+      const fresh = r.messages.filter(m => m.id > t.last);
+      t.meta = r; t.msgs.push(...fresh); if (fresh.length) t.last = fresh[fresh.length - 1].id;
+      t.changed = fresh.length > 0;
+      return t;
+    } finally { t.loading = null; }
+  })();
+  return t.loading;
+}
+function senderName(m, meta) {
+  if (m.is_admin) return 'ทีมงานดีลชัวร์';
+  const u = meta.users[m.sender_id] || {name: '?'};
+  return m.role === 'seller' || m.role === 'shop' ? u.shop_name : u.name;
+}
+function msgHtml(m, meta, prev) {
+  const day = ts => new Intl.DateTimeFormat('th-TH', {day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ}).format(new Date(ts * 1000));
+  const sep = !prev || day(prev.created_at) !== day(m.created_at) ? `<div class="dsep"><span>${day(m.created_at)}</span></div>` : '';
+  const same = prev && !sep && prev.sender_id === m.sender_id && prev.is_admin === m.is_admin && m.created_at - prev.created_at < 300;
+  const u = m.is_admin ? null : meta.users[m.sender_id] || {name: '?', initial: '?'};
+  const av = m.mine ? '' : `<div class="mav">${same ? '' : m.is_admin ? teamAvatar('xs') : avatar(u, 'xs', false)}</div>`;
+  const who = m.mine || same ? '' : `<div class="who">${esc(senderName(m, meta))}${m.is_admin ? ` <span class="badge b-team">${ic('shield', 11)}ทีมงาน</span>` : meta.kind === 'dispute' || meta.kind === 'deal' ? ` <span class="rtag">${ROLE_TH[m.role] || ''}</span>` : ''}</div>`;
+  const ph = m.photos.length ? `<div class="mph n${Math.min(m.photos.length, 2)}">${m.photos.map(p => `<a href="${esc(p)}" target="_blank" rel="noopener"><img src="${esc(p)}" alt="รูปในแชท" loading="lazy"></a>`).join('')}</div>` : '';
+  const tm = new Intl.DateTimeFormat('th-TH', {hour: '2-digit', minute: '2-digit', timeZone: TZ}).format(new Date(m.created_at * 1000));
+  return `${sep}<div class="msg${m.mine ? ' me' : ''}${m.is_admin ? ' team' : ''}${same ? ' cont' : ''}" data-id="${m.id}">${av}<div class="bw">${who}
+    <div class="bub">${ph}${m.text ? `<div class="tx">${esc(m.text)}</div>` : ''}</div>
+    ${m.warn ? `<div class="mwarn">${ic('warn', 13)}ข้อความนี้พูดถึงการโอนเงิน/เลขบัญชี — อย่าโอนนอกแอป จ่ายผ่านดีลชัวร์เท่านั้น</div>` : ''}
+    <div class="mt">${tm}</div></div></div>`;
+}
+function msgsHtml(t) {
+  const m = t.meta;
+  if (!t.msgs.length) {
+    if (m.kind === 'dispute') return `<div class="chat-empty">${teamAvatar('sm')}<div>ทีมงานยังไม่ได้ส่งข้อความ<br><span class="small">มีอะไรอยากบอกทีมงานเพิ่ม พิมพ์ได้เลย</span></div></div>`;
+    return `<div class="chat-empty">${ic('chat', 30)}<div>ยังไม่มีข้อความ<br><span class="small">ทักทาย สอบถามรายละเอียดสินค้า หรือนัดวันส่งของได้เลย</span></div></div>`;
+  }
+  return t.msgs.map((x, i) => msgHtml(x, m, t.msgs[i - 1])).join('');
+}
+function pendingHtml(id) {
+  const t = TH[id];
+  return t.pending.map((p, i) => `<div class="ph"><img src="${p}" alt="รูปที่จะส่ง ${i + 1}"><button class="x" aria-label="ลบรูป" onclick="TH[${id}].pending.splice(${i},1);renderPending(${id})">✕</button></div>`).join('');
+}
+function renderPending(id) { const el = $(`#cpend-${id}`); if (el) { el.innerHTML = pendingHtml(id); el.classList.toggle('hidden', !TH[id].pending.length); } }
+function threadHtml(id, mode) {
+  const t = TH[id], m = t.meta;
+  const closed = m.closed;
+  return `<div class="chat ${mode}">
+    ${m.kind !== 'dispute' ? `<div class="chat-safe">${SAFE_NOTE}</div>` : ''}
+    <div class="msgs" id="msgs-${id}">${msgsHtml(t)}</div>
+    ${closed ? `<div class="chat-closed">${ic('lock', 14)}เรื่องนี้ปิดแล้ว ทีมงานตัดสินเรียบร้อย ส่งข้อความเพิ่มไม่ได้</div>` : `
+    <div class="composer" id="comp-${id}">
+      <div class="photos cpend${t.pending.length ? '' : ' hidden'}" id="cpend-${id}">${pendingHtml(id)}</div>
+      <div class="crow">
+        <button class="cbtn" aria-label="แนบรูป" onclick="chatAddPhoto(${id})">${ic('camera', 22)}</button>
+        <textarea class="input cin" id="cin-${id}" rows="1" maxlength="1000" placeholder="${m.kind === 'dispute' ? 'ตอบทีมงาน…' : 'พิมพ์ข้อความ…'}" oninput="S.drafts[${id}]=this.value;autoGrow(this)">${esc(S.drafts[id] || '')}</textarea>
+        <button class="csend" aria-label="ส่งข้อความ" id="csend-${id}" onclick="chatSend(this,${id})">${ic('send', 20)}</button>
+      </div></div>`}
+  </div>`;
+}
+function autoGrow(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
+function nearBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 80; }
+function scrollChatBottom() {
+  $$('.msgs').forEach(el => { el.scrollTop = el.scrollHeight; });
+  if (route().p === 'chat') window.scrollTo(0, document.body.scrollHeight);
+}
+async function mountThreads() {
+  for (const el of $$('[data-thread]')) {
+    const id = +el.dataset.thread, mode = el.dataset.mode;
+    if (TH[id] && TH[id].meta) el.innerHTML = threadHtml(id, mode); else el.innerHTML = '<div class="empty-st">กำลังโหลดข้อความ…</div>';
+    try { await loadThread(id); } catch (e) { el.innerHTML = noteHtml('err', esc(e.message)); continue; }
+    if (!document.body.contains(el)) continue;
+    el.innerHTML = threadHtml(id, mode);
+    const ta = $(`#cin-${id}`); if (ta && ta.value) autoGrow(ta);
+    const box = $(`#msgs-${id}`); if (box) box.scrollTop = box.scrollHeight;
+    if (mode === 'full') window.scrollTo(0, document.body.scrollHeight);
+  }
+  pollCounts();
+}
+async function refreshThreads() {
+  for (const el of $$('[data-thread]')) {
+    const id = +el.dataset.thread, box = $(`#msgs-${id}`);
+    if (!box) continue;
+    const t = await loadThread(id);
+    if (!t.changed && !(t.meta.closed && !el.querySelector('.chat-closed'))) continue;
+    if (t.meta.closed && !el.querySelector('.chat-closed')) { el.innerHTML = threadHtml(id, el.dataset.mode); continue; }
+    const fullPage = el.dataset.mode === 'full', stick = fullPage ? (window.innerHeight + window.scrollY >= document.body.scrollHeight - 120) : nearBottom(box);
+    box.innerHTML = msgsHtml(t);
+    if (stick) { box.scrollTop = box.scrollHeight; if (fullPage) window.scrollTo(0, document.body.scrollHeight); }
+  }
+}
+function chatAddPhoto(id) {
+  pickFiles('image/*', true, async files => {
+    const t = TH[id];
+    try { for (const f of files.slice(0, 4 - t.pending.length)) t.pending.push(await resizeImage(f, 1280)); } catch (e) { toast(e.message); }
+    if (files.length > 4) toast('ส่งได้ครั้งละไม่เกิน 4 รูป');
+    renderPending(id);
+  });
+}
+function chatSend(btn, id) {
+  busy(btn, async () => {
+    const ta = $(`#cin-${id}`), t = TH[id], text = ta.value.trim();
+    if (!text && !t.pending.length) { ta.focus(); return; }
+    await api(`/threads/${id}/messages`, {text, photos: t.pending});
+    ta.value = ''; S.drafts[id] = ''; t.pending = []; renderPending(id); autoGrow(ta);
+    await loadThread(id);
+    const box = $(`#msgs-${id}`); if (box) { box.innerHTML = msgsHtml(t); box.scrollTop = box.scrollHeight; }
+    if (route().p === 'chat') window.scrollTo(0, document.body.scrollHeight);
+  });
+}
+async function vChat(id) {
+  id = +id;
+  const t = await loadThread(id), m = t.meta;
+  if (m.kind === 'dispute') { location.replace(`#/d/${m.deal.code}/team`); return; }
+  const o = m.other || {name: '?', initial: '?'};
+  const otherShop = m.my_role === 'buyer' || m.my_role === 'customer';
+  const name = otherShop ? o.shop_name : o.name;
+  const ctx = m.deal ? `<a class="chat-ctx" href="#/d/${esc(m.deal.code)}">${thumb(m.deal.photo)}<div class="grow"><div class="small muted">ดีล #${esc(m.deal.code)} · ${baht(m.deal.price)}</div><b class="ell" style="display:block">${esc(m.deal.title)}</b></div>${stLabel(m.deal.status, m.my_role)}</a>`
+    : `<a class="chat-ctx" href="#/shop/${m.kind === 'shop' && m.my_role === 'customer' ? o.id : S.me.id}">${ic('store', 22)}<div class="grow"><b>${m.my_role === 'customer' ? 'ทักจากหน้าร้าน' : 'ลูกค้าทักหน้าร้านของคุณ'}</b><div class="small muted">${m.my_role === 'customer' ? 'ดูสินค้าแล้วกด “ซื้อแบบปลอดภัย” เงินพักไว้จนได้ของ' : 'ส่งลิงก์สินค้า หรือสร้างดีลให้ลูกค้ากดรับ'}</div></div><span class="link">${m.my_role === 'customer' ? 'ดูร้าน →' : 'ร้านของฉัน →'}</span></a>`;
+  $('#view').innerHTML = header({title: `<span class="chat-title">${avatar(o, 'sm')}<span class="ell">${esc(name)}</span></span>`, back: true}) +
+    `<div class="wrap chat-wrap">${ctx}<div data-thread="${id}" data-mode="full"></div></div>`;
+  mountThreads();
+}
+async function vChats() {
+  const r = await api('/chats'); S.chatUnread = r.unread; updateDots();
+  $('#view').innerHTML = header({title: 'แชท', sub: 'คุยกับคู่ดีล ร้านค้า และทีมงานดีลชัวร์'}) + `<div class="wrap">
+    ${r.items.length ? `<div class="card chatlist">${r.items.map(c => `<a class="ci${c.unread ? ' unread' : ''}" href="${esc(c.link)}">
+      ${c.kind === 'dispute' ? teamAvatar('sm') : avatar(c.other, 'sm', false)}
+      <div class="grow"><div class="ci-top"><b class="ell">${esc(c.name)}</b>${c.kind === 'dispute' ? `<span class="badge b-team">${ic('shield', 11)}ทีมงาน</span>` : ''}<span class="ci-time">${ago(c.last.created_at)}</span></div>
+        <div class="ci-sub ell">${c.kind === 'shop' ? ic('store', 12) + ' ' : c.kind === 'deal' ? ic('box', 12) + ' ' : ''}${esc(c.sub)}</div>
+        <div class="ci-last"><span class="ell">${c.last.who ? esc(c.last.who) + ': ' : ''}${esc(c.last.text)}</span>${c.unread ? `<span class="ci-badge">${c.unread > 9 ? '9+' : c.unread}</span>` : ''}</div></div></a>`).join('')}</div>`
+      : `<div class="card"><div class="empty-st"><div class="big">💬</div>ยังไม่มีแชท<br>เปิดหน้าดีลเพื่อคุยกับอีกฝ่าย หรือกด “ทักร้าน” ที่หน้าร้านได้เลย</div></div>`}
+    ${noteHtml('info', SAFE_NOTE)}</div>`;
+}
+function chatShop(btn, uid) {
+  if (!S.me) { S.after = location.hash; location.hash = '#/login'; toast('กรุณาเข้าสู่ระบบก่อนทักร้าน'); return; }
+  busy(btn, async () => { const r = await api(`/shops/${uid}/thread`, {}); location.hash = '#/chat/' + r.thread_id; });
+}
+async function pollCounts() {
+  if (!S.me) return;
+  try {
+    const r = await api('/notifications');
+    if (r.unread !== S.unread || r.chat_unread !== S.chatUnread) { S.unread = r.unread; S.chatUnread = r.chat_unread; updateDots(); }
+    if ($('#notif').classList.contains('open')) { S.notifs = r.items; renderNotif(); }
+    return r;
+  } catch (e) { /* ignore */ }
+}
+setInterval(() => { if (!document.hidden && S.me && $('[data-thread] .msgs')) refreshThreads().catch(() => {}); }, 4000);
+
+/* ---------------- profile picture (crop to square, client-side) ---------------- */
+function avatarPick() {
+  pickFiles('image/*', false, async ([f]) => {
+    if (!f) return;
+    let src; try { src = await resizeImage(f, 1600); } catch (e) { return toast(e.message); }
+    const img = new Image(); img.onload = () => cropSheet(img); img.onerror = () => toast('เปิดรูปนี้ไม่ได้ ลองรูปอื่น'); img.src = src;
+  });
+}
+function cropSheet(img) {
+  const V = 260, C = {img, z: 1, x: 0, y: 0};
+  S.crop = C;
+  openSheet(`<h2>รูปโปรไฟล์ใหม่</h2><p class="small muted">ลากรูปเพื่อจัดตำแหน่ง เลื่อนแถบเพื่อซูม รูปจะถูกตัดเป็นสี่เหลี่ยมจัตุรัส</p>
+    <div class="crop" id="cropBox" style="width:${V}px;height:${V}px"><canvas id="cropCv" width="${V * 2}" height="${V * 2}" style="width:${V}px;height:${V}px"></canvas><div class="ring"></div></div>
+    <div class="zoom">${ic('photo', 16)}<input type="range" id="cropZoom" min="1" max="4" step="0.01" value="1" aria-label="ซูม">${ic('photo', 22)}</div>
+    <button class="btn primary mt12" id="cropSave" onclick="cropSave(this)">${ic('check', 20)}ใช้รูปนี้</button>
+    <button class="btn ghost mt8" onclick="avatarPick()">เลือกรูปอื่น</button>`);
+  const cv = $('#cropCv'), ctx = cv.getContext('2d');
+  const base = Math.max(V / img.width, V / img.height);
+  const clamp = () => { const w = img.width * base * C.z, h = img.height * base * C.z; C.x = Math.max(-(w - V) / 2, Math.min((w - V) / 2, C.x)); C.y = Math.max(-(h - V) / 2, Math.min((h - V) / 2, C.y)); };
+  C.draw = (c, size) => { const k = size / V, w = img.width * base * C.z * k, h = img.height * base * C.z * k; c.fillStyle = '#fff'; c.fillRect(0, 0, size, size); c.drawImage(img, size / 2 - w / 2 + C.x * k, size / 2 - h / 2 + C.y * k, w, h); };
+  const draw = () => { clamp(); C.draw(ctx, V * 2); };
+  let drag = null;
+  cv.addEventListener('pointerdown', e => { drag = {x: e.clientX, y: e.clientY, ox: C.x, oy: C.y}; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointermove', e => { if (!drag) return; C.x = drag.ox + e.clientX - drag.x; C.y = drag.oy + e.clientY - drag.y; draw(); });
+  cv.addEventListener('pointerup', () => drag = null); cv.addEventListener('pointercancel', () => drag = null);
+  $('#cropZoom').oninput = e => { C.z = +e.target.value; draw(); };
+  draw();
+}
+function cropSave(btn) {
+  busy(btn, async () => {
+    const c = document.createElement('canvas'); c.width = c.height = 512;
+    S.crop.draw(c.getContext('2d'), 512);
+    await api('/me/avatar', {image: c.toDataURL('image/jpeg', 0.88)});
+    closeSheet(); toast('เปลี่ยนรูปโปรไฟล์แล้ว ✓'); await vMe();
+  });
+}
+function avatarRemove(btn) {
+  if (!confirm('กลับไปใช้รูปเริ่มต้น?')) return;
+  busy(btn, async () => { await api('/me/avatar', {remove: true}); toast('ใช้รูปเริ่มต้นแล้ว'); await vMe(); });
+}
+
 /* ---------------- live updates ---------------- */
 setInterval(() => {
   const t = Date.now() / 1000 + S.offset;
@@ -902,9 +1126,7 @@ setInterval(() => {
 setInterval(async () => {
   if (!S.me || document.hidden) return;
   try {
-    const r = await api('/notifications');
-    if (r.unread !== S.unread) { S.unread = r.unread; updateDots(); }
-    if ($('#notif').classList.contains('open')) { S.notifs = r.items; renderNotif(); }
+    await pollCounts();
     const {p, a} = route(), busyUI = sheetOpen() || $('#notif').classList.contains('open') || ['INPUT', 'TEXTAREA'].includes((document.activeElement || {}).tagName);
     if (p === 'd' && S.deal && !busyUI) {
       const d = await api('/deals/' + encodeURIComponent(a));

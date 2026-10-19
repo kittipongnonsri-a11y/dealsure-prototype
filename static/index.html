@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=1">
+<link rel="stylesheet" href="/static/app.css?v=2">
 </head>
 <body>
 <div class="app" id="app">
@@ -20,6 +20,7 @@
   <div class="notif" id="notif"></div>
   <nav class="tabbar hidden" id="tabbar">
     <a class="tab" data-t="home" href="#/"><svg><use href="#home"/></svg>ดีลของฉัน</a>
+    <a class="tab" data-t="chats" href="#/chats"><svg><use href="#chat"/></svg>แชท<span class="tbadge hidden" id="chatBadge">0</span></a>
     <a class="tab" data-t="create" href="#/create"><svg><use href="#plus"/></svg>สร้างดีล</a>
     <a class="tab" data-t="shop" href="#/myshop"><svg><use href="#store"/></svg>ร้านของฉัน</a>
     <a class="tab" data-t="me" href="#/me"><svg><use href="#user"/></svg>บัญชี<span class="tdot hidden" id="tdot"></span></a>
@@ -28,6 +29,6 @@
   <input type="file" id="filePick">
   <div class="toast" id="toast"></div>
 </div>
-<script src="/static/app.js?v=1"></script>
+<script src="/static/app.js?v=2"></script>
 </body>
 </html>
