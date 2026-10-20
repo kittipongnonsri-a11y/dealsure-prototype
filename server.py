@@ -8,7 +8,8 @@ import base64, json, os, random, re, secrets, sqlite3, threading, time, mimetype
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from http.cookies import SimpleCookie
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, urlencode
+import urllib.request, urllib.error
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get('DEALSURE_DATA', os.path.join(BASE, 'data'))
@@ -22,6 +23,12 @@ ADMIN_PASSWORD_GENERATED = not ADMIN_PASSWORD
 if ADMIN_PASSWORD_GENERATED:  # ไม่ได้ตั้ง env → สุ่มรหัสใหม่ทุกครั้งที่เปิดเซิร์ฟเวอร์ แล้วพิมพ์ลง log
     ADMIN_PASSWORD = secrets.token_urlsafe(12)
 TZ = timezone(timedelta(hours=7))  # Asia/Bangkok
+# ---- Stripe (โหมดทดสอบเท่านั้น) ----
+# ตั้ง env STRIPE_TEST_SECRET_KEY=sk_test_... เพื่อเปิดการจ่ายบัตรจริงผ่าน Stripe Checkout (test mode)
+# ไม่ตั้ง / ไม่ใช่ sk_test_ → ใช้ระบบเงินจำลองแบบเดิมทั้งหมด (ไม่รับคีย์ live โดยเจตนา)
+_STRIPE_KEY = os.environ.get('STRIPE_TEST_SECRET_KEY', '').strip()
+STRIPE_ON = _STRIPE_KEY.startswith('sk_test_')
+STRIPE_DEV = STRIPE_ON and os.environ.get('DEALSURE_STRIPE_DEV') == '1'  # เปิด endpoint ทดสอบจ่ายด้วย pm_card_visa (เครื่องนักพัฒนาเท่านั้น)
 HOUR, DAY = 3600, 86400
 
 # ---- business rules ----
@@ -145,7 +152,8 @@ def _migrate():
             ('deals', 'cancel_charge', 'REAL'), ('deals', 'fee_charged', 'REAL'), ('deals', 'penalty', 'REAL'), ('deals', 'fault', 'TEXT'),
             ('payouts', 'batch_id', 'INTEGER'), ('payouts', 'pen_ded', 'REAL DEFAULT 0'),
             ('deals', 'pay_method', 'TEXT'), ('deals', 'card_fee', 'REAL DEFAULT 0'),
-            ('deals', 'pack_video', 'TEXT'), ('deals', 'unbox_video', 'TEXT'), ('deals', 'unbox_requested_at', 'REAL'), ('deals', 'pack_requested_at', 'REAL'))
+            ('deals', 'pack_video', 'TEXT'), ('deals', 'unbox_video', 'TEXT'), ('deals', 'unbox_requested_at', 'REAL'), ('deals', 'pack_requested_at', 'REAL'),
+            ('deals', 'stripe_session', 'TEXT'), ('deals', 'stripe_pi', 'TEXT'), ('deals', 'stripe_refund', 'TEXT'))
     for table, col, typ in cols:
         if col not in [r[1] for r in db.execute(f'PRAGMA table_info({table})')]:
             db.execute(f'ALTER TABLE {table} ADD COLUMN {col} {typ}')
@@ -179,6 +187,37 @@ def calc_fee(price, payer):
     else:
         bf = money(fee / 2); sf = money(fee - bf)
     return dict(fee=fee, buyer_fee=bf, seller_fee=sf, buyer_pay=money(price + bf), seller_get=money(price - sf))
+
+
+def stripe_call(method, path, data=None, idem=None):
+    """เรียก Stripe API ด้วย urllib (ไม่พิมพ์คีย์ลง log)"""
+    if not STRIPE_ON: raise ApiError('ยังไม่ได้เปิดใช้ Stripe', 503)
+    body = urlencode(data or {}).encode() if method == 'POST' else None
+    url = 'https://api.stripe.com/v1' + path + ('' if method == 'POST' or not data else '?' + urlencode(data))
+    r = urllib.request.Request(url, data=body, method=method)
+    r.add_header('Authorization', 'Basic ' + base64.b64encode((_STRIPE_KEY + ':').encode()).decode())
+    if idem: r.add_header('Idempotency-Key', idem)
+    try:
+        with urllib.request.urlopen(r, timeout=30) as resp: return json.load(resp)
+    except urllib.error.HTTPError as e:
+        try: msg = json.load(e).get('error', {}).get('message', '')
+        except Exception: msg = ''
+        print(f'[stripe] {method} {path} -> {e.code} {msg[:200]}')
+        raise ApiError('Stripe: ' + (msg or 'เกิดข้อผิดพลาด'), 502)
+    except (urllib.error.URLError, TimeoutError):
+        raise ApiError('ติดต่อ Stripe ไม่ได้ ลองใหม่อีกครั้ง', 502)
+
+
+def satang(x): return int(round(float(x) * 100))
+
+
+def stripe_refund(d, amount):
+    """คืนเงินผ่าน Stripe (test mode) เฉพาะดีลที่จ่ายด้วยบัตรผ่าน Stripe · ค่าธรรมเนียมบัตรไม่คืน"""
+    if not d['stripe_pi'] or amount <= 0: return None
+    rf = stripe_call('POST', '/refunds', {'payment_intent': d['stripe_pi'], 'amount': satang(amount),
+                     'metadata[deal]': d['code']}, idem=f"refund-{d['code']}-{satang(amount)}")
+    ex('UPDATE deals SET stripe_refund=? WHERE id=?', (rf.get('id'), d['id']))
+    return rf
 
 
 def card_surcharge(paid):
@@ -333,6 +372,9 @@ def new_code():
 
 def notify(uid, code, text, icon='info', link=None):
     if not uid: return
+    if code and '(จำลอง)' in text and 'คืนเงิน' in text:  # ดีลที่จ่ายผ่าน Stripe test mode: คืนเข้าบัตรจริง (ทดสอบ) ไม่ใช่เงินจำลอง
+        dd = q1('SELECT stripe_pi FROM deals WHERE code=?', (code,))
+        if dd and dd['stripe_pi']: text = text.replace('(จำลอง)', '(คืนเข้าบัตรทดสอบ Stripe)')
     if link:  # แชท: รวมเป็นแจ้งเตือนเดียวต่อห้องแชท จนกว่าจะอ่าน (ไม่ให้กระดิ่งรก)
         old = q1('SELECT id FROM notifications WHERE user_id=? AND link=? AND read=0', (uid, link))
         if old:
@@ -598,6 +640,7 @@ def complete(d, reason, at=None):
 def refund_seller_fault(d, t, resolution, note=None):
     """ผู้ขาย/เจ้าของที่พักเป็นฝ่ายผิด: คืนผู้ซื้อเต็มจำนวนรวมค่าธรรมเนียม + บันทึกค่าปรับ (= ค่าธรรมเนียมของดีล) หักจากยอดโอนรอบถัดไป"""
     pen = money(d['fee'])
+    stripe_refund(d, d['buyer_pay'])
     ex("""UPDATE deals SET status='refunded', refunded_at=?, refund_amount=?, resolution=?, resolution_note=COALESCE(?, resolution_note),
           fault='seller', penalty=?, fee_charged=0, cancel_charge=0 WHERE id=?""", (t, d['buyer_pay'], resolution, note, pen, d['id']))
     ex("INSERT INTO records(user_id,deal_id,kind,amount,reason,created_at) VALUES(?,?,'penalty',?,?,?)", (d['seller_id'], d['id'], pen, resolution, now()))
@@ -609,6 +652,7 @@ def refund_seller_fault(d, t, resolution, note=None):
 def refund_buyer_choice(d, t, resolution, note=None):
     """ผู้ซื้อ/ผู้เข้าพักยกเลิกเอง: คืนเงินหักค่าดำเนินการ 2% ของยอดที่จ่าย ขั้นต่ำ 10 บาท"""
     ch = deal_cancel_charge(d); back = money(d['buyer_pay'] - ch)
+    stripe_refund(d, back)
     ex("""UPDATE deals SET status='refunded', refunded_at=?, refund_amount=?, resolution=?, resolution_note=COALESCE(?, resolution_note),
           fault='buyer', cancel_charge=?, fee_charged=0, penalty=0 WHERE id=?""", (t, back, resolution, note, ch, d['id']))
     notify(d['buyer_id'], d['code'], f'คืนเงิน {fmt_baht(back)} ให้คุณแล้ว (จำลอง) · หักค่าดำเนินการ {fmt_baht(ch)}', 'wallet')
@@ -652,7 +696,8 @@ def process(d):
 def process_all():
     with LOCK:
         for d in q("SELECT * FROM deals WHERE status IN ('shipped','delivered') OR (status='held' AND kind='stay')"):
-            process(d)
+            try: process(d)
+            except ApiError as e: print(f'[process] {d["code"]}: {e}', flush=True)  # เช่น Stripe ล่ม → ลองใหม่รอบหน้า
         db.commit()
 
 
@@ -720,6 +765,7 @@ def deal_view(d, me):
             out['pay_options'] = dict(promptpay=dict(surcharge=0, total=d['buyer_pay'], cancel_charge=cancel_charge(d['buyer_pay'])),
                                       card=dict(surcharge=cf, total=money(d['buyer_pay'] + cf), cancel_charge=cancel_charge(d['buyer_pay'], 'card', cf)))
     out['payout_rule'] = dict(fee=PAYOUT_FEE, free_from=PAYOUT_FREE_FROM)
+    out['stripe'] = dict(enabled=STRIPE_ON, mode='test', paid=bool(d['stripe_pi']), refunded=bool(d['stripe_refund'])) if party else dict(enabled=STRIPE_ON)
     out.update(my_role=role, actions=acts, deal_now=t, due_ts=due_ts(d['due_date']), overdue=overdue,
                dispute_until=dispute_until, is_creator=bool(uid and d['creator_id'] == uid))
     out['seller'] = public_user(get_user(d['seller_id']))
@@ -1087,7 +1133,14 @@ def api_pay(req, me, b, code):
     if d['status'] != 'accepted': raise ApiError('ดีลนี้ยังจ่ายไม่ได้ หรือจ่ายไปแล้ว')
     method = b.get('method') or 'promptpay'
     if method not in PAY_METHODS: raise ApiError('กรุณาเลือกวิธีจ่าย')
+    if method == 'card' and STRIPE_ON:
+        raise ApiError('จ่ายด้วยบัตรผ่าน Stripe Checkout (โหมดทดสอบ) กรุณากดปุ่มจ่ายด้วยบัตรอีกครั้ง', 409)
     cf = card_surcharge(d['buyer_pay']) if method == 'card' else 0.0
+    return mark_paid(d, method, cf)
+
+
+def mark_paid(d, method, cf, real=False):
+    code = d['code']
     ex('UPDATE deals SET pay_method=?, card_fee=? WHERE id=?', (method, cf, d['id']))
     total = fmt_baht(money(d['buyer_pay'] + cf)) + (f' (รวมค่าธรรมเนียมบัตร {fmt_baht(cf)})' if cf else '')
     if is_stay(d):
@@ -1098,14 +1151,90 @@ def api_pay(req, me, b, code):
            (t, code4, max(d['checkin_at'], t) + STAY_RELEASE, d['id']))
         notify(d['seller_id'], code, f'ผู้เข้าพักจ่ายแล้ว {fmt_baht(d["buyer_pay"])} (จำลอง) เงินพักไว้จนเช็คอิน · '
                'วันเช็คอินบอกรหัส 4 หลักให้ผู้เข้าพักกรอกเมื่อเข้าห้องได้แล้ว', 'lock')
-        notify(d['buyer_id'], code, f'ชำระเงิน {total} สำเร็จ (จำลอง) เงินพักไว้ · เจ้าของที่พักได้เงินเมื่อคุณเช็คอินได้จริง', 'lock')
+        notify(d['buyer_id'], code, f'ชำระเงิน {total} สำเร็จ ' + ('(บัตรทดสอบ Stripe)' if real else '(จำลอง)') + ' เงินพักไว้ · เจ้าของที่พักได้เงินเมื่อคุณเช็คอินได้จริง', 'lock')
         return {'ok': True}
     meet = f'{random.randint(0, 9999):04d}' if d['delivery'] == 'meet' else None
     ex("UPDATE deals SET status='held', paid_at=?, meet_code=? WHERE id=?", (dnow(d), meet, d['id']))
     notify(d['seller_id'], code, f'ผู้ซื้อจ่ายแล้ว {fmt_baht(d["buyer_pay"])} (จำลอง) เงินพักไว้แล้ว · ' +
            ('นัดรับแล้วบอกรหัส 4 หลักให้ผู้ซื้อหลังเขาตรวจของ' if meet else 'ส่งของได้เลย'), 'lock')
-    notify(d['buyer_id'], code, f'ชำระเงิน {total} สำเร็จ (จำลอง) เงินถูกพักไว้แล้ว', 'lock')
+    notify(d['buyer_id'], code, f'ชำระเงิน {total} สำเร็จ ' + ('(บัตรทดสอบ Stripe)' if real else '(จำลอง)') + ' เงินถูกพักไว้แล้ว', 'lock')
     return {'ok': True}
+
+
+def req_origin(req):
+    proto = req.headers.get('X-Forwarded-Proto') or 'http'
+    return f"{proto}://{req.headers.get('Host') or 'localhost'}"
+
+
+def pay_ready(code, me):
+    d = act(code, me); require_party(d, me, 'buyer')
+    if d['status'] != 'accepted': raise ApiError('ดีลนี้ยังจ่ายไม่ได้ หรือจ่ายไปแล้ว')
+    if is_stay(d) and dnow(d) >= d['checkin_at'] + STAY_RELEASE: raise ApiError('เลยเวลาเช็คอินมานานแล้ว จ่ายดีลนี้ไม่ได้ กรุณาสร้างดีลใหม่')
+    return d
+
+
+@route('POST', r'/api/deals/([A-Z0-9-]+)/stripe-checkout')
+def api_stripe_checkout(req, me, b, code):
+    """สร้าง Stripe Checkout Session (test mode) สำหรับจ่ายบัตร: ยอด = ยอดผู้ซื้อ + ค่าธรรมเนียมบัตร 4% + 11 บาท"""
+    if not STRIPE_ON: raise ApiError('ยังไม่ได้เปิดใช้ Stripe (โหมดจำลอง)', 503)
+    d = pay_ready(code, me)
+    cf = card_surcharge(d['buyer_pay']); total = money(d['buyer_pay'] + cf); o = req_origin(req)
+    sess = stripe_call('POST', '/checkout/sessions', {
+        'mode': 'payment', 'client_reference_id': code,
+        'line_items[0][quantity]': 1, 'line_items[0][price_data][currency]': 'thb',
+        'line_items[0][price_data][unit_amount]': satang(total),
+        'line_items[0][price_data][product_data][name]': f'DealSure #{code} · {d["title"][:80]}',
+        'line_items[0][price_data][product_data][description]': f'ยอดดีล {fmt_baht(d["buyer_pay"])} + ค่าธรรมเนียมบัตร {fmt_baht(cf)} (ไม่คืน)',
+        'adaptive_pricing[enabled]': 'false',  # ให้จ่ายเป็นบาทเสมอ (ยอดต้องตรงกับดีล)
+        'excluded_payment_method_types[0]': 'promptpay',  # ทางบัตรเท่านั้น (พร้อมเพย์ใช้ทางจำลองที่ไม่มีค่าธรรมเนียมบัตร)
+        'metadata[deal]': code, 'metadata[card_fee]': f'{cf:.2f}', 'payment_intent_data[metadata][deal]': code,
+        'success_url': f'{o}/?stripe_session={{CHECKOUT_SESSION_ID}}#/d/{code}', 'cancel_url': f'{o}/#/d/{code}'})
+    ex('UPDATE deals SET stripe_session=? WHERE id=?', (sess['id'], d['id']))
+    return {'ok': True, 'url': sess['url'], 'session_id': sess['id'], 'amount': total}
+
+
+@route('POST', r'/api/deals/([A-Z0-9-]+)/stripe-confirm')
+def api_stripe_confirm(req, me, b, code):
+    """ผู้ซื้อกลับจาก Checkout: ดึง session จาก Stripe มาตรวจเองว่าจ่ายแล้วจริงและยอดตรง (ไม่เชื่อข้อมูลจากเบราว์เซอร์)"""
+    if not STRIPE_ON: raise ApiError('ยังไม่ได้เปิดใช้ Stripe', 503)
+    d = act(code, me); require_party(d, me, 'buyer')
+    sid = s_(b.get('session_id'), 200)
+    if d['stripe_pi'] and d['status'] != 'accepted': return {'ok': True, 'already': True}
+    if not sid or sid != d['stripe_session']: raise ApiError('ไม่พบรายการชำระเงินของดีลนี้')
+    s = stripe_call('GET', f'/checkout/sessions/{sid}')
+    if s.get('metadata', {}).get('deal') != code: raise ApiError('รายการชำระเงินไม่ตรงกับดีล')
+    if s.get('payment_status') != 'paid': return {'ok': False, 'status': s.get('payment_status')}
+    d = pay_ready(code, me)
+    cf = card_surcharge(d['buyer_pay'])
+    if s.get('amount_total') != satang(d['buyer_pay'] + cf) or s.get('currency') != 'thb': raise ApiError('ยอดที่จ่ายไม่ตรงกับดีล กรุณาติดต่อทีมงาน')
+    ex('UPDATE deals SET stripe_pi=? WHERE id=?', (s.get('payment_intent'), d['id']))
+    mark_paid(d, 'card', cf, real=True)
+    return {'ok': True}
+
+
+@route('POST', r'/api/deals/([A-Z0-9-]+)/stripe-test-pay')
+def api_stripe_test_pay(req, me, b, code):
+    """เครื่องนักพัฒนาเท่านั้น (DEALSURE_STRIPE_DEV=1): จ่ายจริงใน test mode ด้วย pm_card_visa ผ่าน PaymentIntent โดยไม่ต้องเปิดหน้า Checkout"""
+    if not STRIPE_DEV: raise ApiError('ไม่พบ API นี้', 404)
+    d = pay_ready(code, me); cf = card_surcharge(d['buyer_pay'])
+    pi = stripe_call('POST', '/payment_intents', {'amount': satang(d['buyer_pay'] + cf), 'currency': 'thb', 'payment_method': 'pm_card_visa',
+                     'automatic_payment_methods[enabled]': 'true', 'automatic_payment_methods[allow_redirects]': 'never',
+                     'confirm': 'true', 'metadata[deal]': code})
+    if pi.get('status') != 'succeeded': raise ApiError('Stripe: ชำระเงินไม่สำเร็จ', 502)
+    ex('UPDATE deals SET stripe_pi=? WHERE id=?', (pi['id'], d['id']))
+    mark_paid(d, 'card', cf, real=True)
+    return {'ok': True, 'payment_intent': pi['id']}
+
+
+@route('GET', r'/api/admin/stripe/deal/([A-Z0-9-]+)', admin=True, auth=False)
+def api_admin_stripe_deal(req, me, b, code):
+    """แอดมิน: ดูสถานะจริงจาก Stripe (ยอดจ่าย/ยอดคืน) ของดีล"""
+    d = get_deal(code)
+    if not d or not d['stripe_pi']: raise ApiError('ดีลนี้ไม่ได้จ่ายผ่าน Stripe', 404)
+    pi = stripe_call('GET', f"/payment_intents/{d['stripe_pi']}", {'expand[]': 'latest_charge'})
+    ch = pi.get('latest_charge') or {}
+    return {'payment_intent': pi['id'], 'status': pi.get('status'), 'amount': pi.get('amount', 0) / 100,
+            'amount_refunded': (ch.get('amount_refunded') or 0) / 100, 'refund_id': d['stripe_refund'], 'livemode': pi.get('livemode')}
 
 
 @route('POST', r'/api/deals/([A-Z0-9-]+)/ship')
@@ -1813,6 +1942,7 @@ def api_admin_resolve(req, me, b, code):
         mx = partial_max_refund(d)
         if not 0 < amt < mx: raise ApiError(f'คืนบางส่วนได้มากกว่า 0 และน้อยกว่า {fmt_baht(mx)} (ราคาดีล − ค่าธรรมเนียมส่วนผู้ขาย) ถ้าจะคืนเกินนี้ให้เลือกคืนเต็ม')
         sp = partial_split(d, amt); pay = sp['pay']
+        stripe_refund(d, amt)
         ex("""UPDATE deals SET status='partial', completed_at=?, refunded_at=?, refund_amount=?, payout_amount=?, resolution='partial',
               resolution_note=?, fee_charged=? WHERE id=?""", (t, t, amt, pay, note, sp['fee'], d['id']))
         if pay > 0:
@@ -2097,6 +2227,7 @@ if __name__ == '__main__':
                 seed.run_v8(db); db.commit()
                 print('เพิ่มสินค้าขายประจำตัวอย่างร้านทองแล้ว (v8)', flush=True)
     threading.Thread(target=ticker, daemon=True).start()
+    print('[stripe] ' + ('เปิดโหมดทดสอบ (test mode) สำหรับจ่ายบัตร' if STRIPE_ON else 'ปิดอยู่ – ใช้เงินจำลอง (ตั้ง STRIPE_TEST_SECRET_KEY=sk_test_... เพื่อเปิด)'), flush=True)
     if ADMIN_PASSWORD_GENERATED:
         print(f'[admin] ไม่ได้ตั้ง ADMIN_PASSWORD – สุ่มรหัสผู้ดูแลชั่วคราว: {ADMIN_PASSWORD}', flush=True)
         try:  # เก็บไว้ในเครื่องให้ทดสอบอ่านได้ (data/ ไม่อยู่ใน git)

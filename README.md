@@ -229,3 +229,24 @@ python3 tests/e2e_v6_fees_browser.py                  # ทดสอบ v6 ผ�
 3. **คืนบางส่วน**: ค่าธรรมเนียมเต็มของดีล แบ่งตามผู้จ่าย · ผู้ขายได้ = ราคา − เงินคืน − ส่วนผู้ขาย
 4. **ค่าโอนออกฟรีเมื่อยอดรวม ≥ 3,000 ฿/วัน**
 5. **ค่าปรับ** หักจากยอดรอโอนทันที · ค้าง → สร้าง/รับดีลใหม่ + โอนออกไม่ได้ (`POST /api/penalties/pay` จำลองชำระ) · ผู้ขาย < 5 ดีลสำเร็จ สูงสุด 3,000 ฿/ดีล
+
+## v14 – Stripe TEST mode (จ่ายบัตร) · ไม่บังคับ
+
+- ตั้ง env `STRIPE_TEST_SECRET_KEY=sk_test_...` → ตัวเลือก **บัตร** จะพาไปหน้า **Stripe Checkout (test mode)** จริง
+  (ยอด = ยอดผู้ซื้อ + ค่าธรรมเนียมบัตร 4% + 11 บาท, สกุลบาทเท่านั้น, Checkout แสดงเฉพาะบัตร).
+  กลับมาที่ `/?stripe_session=...#/d/CODE` → เซิร์ฟเวอร์ **ดึง session จาก Stripe มาตรวจเอง** (สถานะ paid + ยอดตรง + deal ตรง) แล้วจึงพักเงิน (held). ไม่ต้องใช้ webhook.
+- คีย์ที่ไม่ขึ้นต้น `sk_test_` จะถูกเพิกเฉย (ไม่รับคีย์ live). ไม่ตั้งคีย์ = ระบบเงินจำลองเดิมทุกอย่าง.
+- PromptPay ยังเป็นการจำลองเหมือนเดิม.
+- คืนเงิน (ผู้ซื้อยกเลิก / ผู้ขายผิด / ส่งช้า / แอดมินตัดสินคืนเต็มหรือบางส่วน) เรียก `POST /v1/refunds` ด้วยยอดที่ถูกต้อง
+  (ค่าธรรมเนียมบัตรไม่คืน · ผู้ซื้อยกเลิกเองหักค่าดำเนินการ max(10, 2%, ต้นทุน+5)). ถ้า Stripe ล้มเหลว ธุรกรรมจะ rollback ไม่เปลี่ยนสถานะดีล.
+- แอดมินดูยอดจริงจาก Stripe: `GET /api/admin/stripe/deal/CODE`.
+- ทดสอบในเครื่อง: `DEALSURE_STRIPE_DEV=1` เปิด `POST /api/deals/CODE/stripe-test-pay` (จ่ายด้วย `pm_card_visa` ผ่าน PaymentIntent). ห้ามเปิดบนเว็บจริง.
+  `tests/api_v14_stripe_test.py`, `tests/e2e_v14_stripe_browser.py` (กรอกบัตร 4242 บนหน้า Checkout จริง).
+
+**โอนเงินให้ผู้ขายผ่าน Stripe Connect – ยังทำไม่ได้ (ทดสอบแล้ว 20 ต.ค. 2569):**
+1. Accounts v1 ถูกปิดสำหรับ integration ใหม่ ต้องใช้ Accounts v2.
+2. Accounts v2: แพลตฟอร์มในไทย **สร้างบัญชีที่แพลตฟอร์มรับผิดชอบความเสียหายไม่ได้** (Express/Custom) — "Platforms in TH cannot create accounts where the platform is loss-liable".
+   สร้างได้เฉพาะบัญชีแบบ full dashboard (Standard) ที่ Stripe รับความเสี่ยง.
+3. แต่ `POST /v1/transfers` ไปบัญชีไทยถูกปฏิเสธ: "Funds can't be sent to accounts located in TH because it's restricted outside of your platform's region".
+   → โมเดล escrow (เก็บเงินไว้แล้วโอนให้ผู้ขายทีหลัง) ผ่าน Stripe Connect ในไทยใช้ไม่ได้ตอนนี้ ดู https://support.stripe.com/questions/stripe-thailand-support-for-marketplaces
+   ทางเลือก: คุยกับ Stripe ไทยเรื่องเปิดสิทธิ์, หรือโอนให้ผู้ขายนอก Stripe (บัญชีธนาคาร/PromptPay ผ่านผู้ให้บริการ payout เช่น Omise/Opn), ระบบโอนออกรายวันใน DealSure ยังเป็นการจำลอง.

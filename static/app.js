@@ -746,7 +746,7 @@ async function vDeal(code) {
   else if (st === 'delivered') H = `<div class="status-hero">${ic('clock', 30, 'color:#E9A23B!important;flex:none')}<div style="flex:1"><div class="small muted">ระบบจะโอนเงินให้ผู้ขายอัตโนมัติใน</div><div class="timer" data-until="${d.auto_release_at}">${dur(d.auto_release_at - d.deal_now)}</div></div>${wait('รอยืนยัน')}</div>`;
   else if (st === 'disputed') H = hero('warn', 'var(--red)', 'ทีมงานกำลังตรวจสอบ (ภายใน 24 ชม.)', 'เงินยังพักไว้', '<span class="spill sp-red">ข้อพิพาท</span>');
   else if (st === 'completed') H = hero('check', 'var(--tq)', 'ดีลสำเร็จ · ปล่อยเงินให้ผู้ขายแล้ว', baht(d.seller_get), '<span class="spill sp-done">สำเร็จ</span>');
-  else if (st === 'refunded') H = hero('wallet', 'var(--tq)', d.cancel_charge > 0 ? `คืนเงินให้ผู้ซื้อแล้ว · หักค่าดำเนินการ ${baht(d.cancel_charge)} (จำลอง)` : 'คืนเงินให้ผู้ซื้อแล้ว · เต็มจำนวนรวมค่าธรรมเนียม (จำลอง)', baht(d.refund_amount), '<span class="spill sp-gray">คืนเงิน</span>');
+  else if (st === 'refunded') H = hero('wallet', 'var(--tq)', d.cancel_charge > 0 ? `คืนเงินให้ผู้ซื้อแล้ว · หักค่าดำเนินการ ${baht(d.cancel_charge)} ${simTag(d, 1)}` : `คืนเงินให้ผู้ซื้อแล้ว · เต็มจำนวนรวมค่าธรรมเนียม ${simTag(d, 1)}`, baht(d.refund_amount), '<span class="spill sp-gray">คืนเงิน</span>');
   else if (st === 'partial') H = hero('wallet', 'var(--tq)', 'ทีมงานตัดสินคืนเงินบางส่วน', 'คืนผู้ซื้อ ' + baht(d.refund_amount), '<span class="spill sp-gray">แบ่งเงิน</span>');
   else H = hero('info', 'var(--muted)', 'ดีลนี้ถูกยกเลิกแล้ว', 'ยกเลิก', '<span class="spill sp-gray">ยกเลิก</span>');
 
@@ -877,7 +877,7 @@ function timeline(d) {
   const by = d.creator_role === 'seller' ? d.seller : d.buyer;
   it.push({t: d.source === 'shop' ? 'สั่งซื้อจากหน้าร้าน' : 'สร้างดีล', m: `${dFull(d.created_at)}${by ? ' โดย ' + esc(d.creator_role === 'seller' ? by.shop_name : by.name) : ''}`, done: true});
   if (d.source !== 'shop') it.push({t: (d.creator_role === 'seller' ? 'ผู้ซื้อ' : 'ผู้ขาย') + 'กดรับดีล', m: d.accepted_at ? dFull(d.accepted_at) : 'รออีกฝ่ายเปิดลิงก์', done: !!d.accepted_at});
-  it.push({t: 'ผู้ซื้อจ่ายแล้ว – เงินพักไว้', m: d.paid_at ? `${dTime(d.paid_at)} · ยอด ${baht(d.buyer_pay)} ผ่านพร้อมเพย์ (จำลอง)` : 'ผู้ซื้อจ่ายเงินเข้าระบบพักเงิน', done: !!d.paid_at});
+  it.push({t: 'ผู้ซื้อจ่ายแล้ว – เงินพักไว้', m: d.paid_at ? `${dTime(d.paid_at)} · ยอด ${baht(d.buyer_pay)} ${d.stripe && d.stripe.paid ? 'ผ่านบัตร (Stripe test mode)' : 'ผ่านพร้อมเพย์ (จำลอง)'}` : 'ผู้ซื้อจ่ายเงินเข้าระบบพักเงิน', done: !!d.paid_at});
   if (d.delivery === 'parcel') {
     it.push({t: 'ผู้ขายส่งของแล้ว', m: d.shipped_at ? `${dTime(d.shipped_at)} · ${esc(d.carrier)}${d.on_time === 0 ? ' · ส่งช้ากว่ากำหนด' : ''}` : 'ภายใน ' + dDate(d.due_date), done: !!d.shipped_at,
       x: d.tracking ? `<div class="trk"><span>เลขพัสดุ <code>${esc(d.tracking)}</code></span><button class="link" onclick="copyText('${esc(d.tracking)}','คัดลอกเลขพัสดุแล้ว')">คัดลอก</button></div>` : ''});
@@ -891,7 +891,7 @@ function timeline(d) {
     it.push({t: 'นัดรับ – ผู้ซื้อกรอกรหัส 4 หลัก', m: d.completed_at && d.release_reason === 'meet_code' ? `${dTime(d.completed_at)} · รหัสถูกต้อง ปล่อยเงินทันที` : 'ภายใน ' + dDate(d.due_date) + ' · ผู้ซื้อตรวจของแล้วกรอกรหัสจากผู้ขาย', done: !!d.completed_at});
   }
   if (d.disputed_at) it.push({t: 'ผู้ซื้อแจ้งปัญหา', m: `${dTime(d.disputed_at)} · ${esc(d.dispute_reason)}`, done: d.status !== 'disputed', now: d.status === 'disputed'});
-  if (d.status === 'refunded') it.push({t: {late: 'คืนเงินผู้ซื้อเต็มจำนวน (ส่งช้าเกินกำหนด)', buyer_cancel: 'ผู้ซื้อยกเลิกก่อนส่งของ · คืนเงินหักค่าดำเนินการ', seller_cancel: 'ผู้ขายยกเลิก · คืนเงินผู้ซื้อเต็มจำนวน'}[d.resolution] || (d.cancel_charge > 0 ? 'คืนเงินผู้ซื้อ (หักค่าดำเนินการ)' : 'คืนเงินผู้ซื้อเต็มจำนวน'), m: `${dTime(d.refunded_at)} · ${baht(d.refund_amount)}${d.cancel_charge > 0 ? ' · ค่าดำเนินการ ' + baht(d.cancel_charge) : ''} (จำลอง)`, done: true});
+  if (d.status === 'refunded') it.push({t: {late: 'คืนเงินผู้ซื้อเต็มจำนวน (ส่งช้าเกินกำหนด)', buyer_cancel: 'ผู้ซื้อยกเลิกก่อนส่งของ · คืนเงินหักค่าดำเนินการ', seller_cancel: 'ผู้ขายยกเลิก · คืนเงินผู้ซื้อเต็มจำนวน'}[d.resolution] || (d.cancel_charge > 0 ? 'คืนเงินผู้ซื้อ (หักค่าดำเนินการ)' : 'คืนเงินผู้ซื้อเต็มจำนวน'), m: `${dTime(d.refunded_at)} · ${baht(d.refund_amount)}${d.cancel_charge > 0 ? ' · ค่าดำเนินการ ' + baht(d.cancel_charge) : ''} ${simTag(d, 1)}`, done: true});
   else if (d.status === 'cancelled') it.push({t: 'ยกเลิกดีล', m: dTime(d.cancelled_at), done: true});
   else {
     if (d.delivery !== 'meet' || d.status === 'partial') it.push({t: d.status === 'partial' ? 'ทีมงานตัดสินแบ่งเงิน' : 'ยืนยันรับของ', m: d.completed_at ? `${dTime(d.completed_at)} · ${{buyer_confirm: 'ผู้ซื้อกดยืนยัน', auto: 'ระบบยืนยันอัตโนมัติ (ครบกำหนด)', admin: 'ทีมงานตัดสินให้ปล่อยเงิน'}[d.release_reason] || 'คืนผู้ซื้อ ' + baht(d.refund_amount)}` : 'ผู้ซื้อกดยืนยันว่าได้รับสินค้าครบถ้วน', done: !!d.completed_at});
@@ -935,12 +935,13 @@ function meetSubmit(btn) {
   });
 }
 
+const simTag = (d, refund) => d.stripe && d.stripe.paid ? (refund ? '(คืนเข้าบัตรทดสอบ Stripe)' : '(บัตรทดสอบ Stripe)') : '(จำลอง)';
 /* ---------------- deal sheets ---------------- */
 function paySheet() {
-  const d = S.deal; S.payM = S.payM || 'promptpay';
+  const d = S.deal; S.payM = S.payM || 'promptpay'; const st = !!(d.stripe && d.stripe.enabled);
   const po = d.pay_options || {promptpay: {surcharge: 0, total: d.buyer_pay, cancel_charge: d.buyer_cancel_charge}, card: {surcharge: cardFee(d.buyer_pay), total: r2(d.buyer_pay + cardFee(d.buyer_pay)), cancel_charge: d.buyer_cancel_charge}};
   openSheet(`<h2 style="text-align:center">จ่ายเงินเข้าระบบพักเงิน</h2>
-    <div class="paytest">โหมดทดลอง – ไม่มีเงินจริง<small>ไม่ต้องสแกน ไม่ต้องโอนเงิน กดปุ่มด้านล่างเพื่อจำลองการจ่าย</small></div>
+    <div class="paytest">โหมดทดลอง – ไม่มีเงินจริง<small>${st ? 'พร้อมเพย์ = จำลอง · บัตร = ระบบทดสอบของ Stripe (ใช้บัตรทดสอบ 4242 4242 4242 4242 เท่านั้น)' : 'ไม่ต้องสแกน ไม่ต้องโอนเงิน กดปุ่มด้านล่างเพื่อจำลองการจ่าย'}</small></div>
     <label class="lb">เลือกวิธีจ่าย</label>
     <div class="paym" id="payMethod">
       <button type="button" data-m="promptpay"><b>พร้อมเพย์</b><span class="rec">แนะนำ</span><small>ไม่มีค่าธรรมเนียมเพิ่ม</small></button>
@@ -957,6 +958,7 @@ function paySheet() {
       <div style="display:flex;justify-content:center">${fakeQr(180, 29, d.code)}</div>
       <div class="prompt mt8" style="font-size:24px;font-weight:700;color:var(--navy)">${(+o.total).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ฿</div>
       <div class="small muted">บัญชีพักเงิน ดีลชัวร์ (ตัวอย่าง) · ดีล #${esc(d.code)}</div><div class="demo mt8">QR จำลอง – สแกนไม่ได้</div></div>`
+      : st ? `<div class="card" id="stripeBox" style="box-shadow:none;border:1.5px dashed var(--line);text-align:center;padding:14px"><b>💳 จ่ายผ่าน Stripe Checkout</b><span class="rec" style="margin-left:6px">TEST MODE</span><div class="small muted">ระบบจะพาไปหน้าชำระเงินของ Stripe · ใช้บัตรทดสอบ 4242 4242 4242 4242 วันหมดอายุอนาคต CVC 3 หลักใดก็ได้ · ห้ามใช้บัตรจริง</div></div>`
       : `<div class="card" style="box-shadow:none;border:1.5px dashed var(--line);text-align:center;padding:14px"><b>💳 บัตรจำลอง •••• 4242</b><div class="small muted">ไม่ต้องกรอกเลขบัตรจริง</div></div>`) +
       `<div class="card fee" id="payCharges" style="box-shadow:none;margin-bottom:10px"><h4 style="margin:0 0 6px">ค่าใช้จ่ายทั้งหมด (ก่อนจ่าย)</h4>
       <div class="r"><span class="muted">${isStay(d) ? 'ราคาที่พัก' : 'ราคาสินค้า'}</span><b>${baht(d.price)}</b></div>
@@ -969,12 +971,14 @@ function paySheet() {
       <div class="r"><span class="muted">${isStay(d) ? 'เจ้าของที่พักยกเลิก / ไม่ตรงปก' : 'ผู้ขายยกเลิก / ส่งไม่ทัน / ไม่ตรงปก'}</span><b>ได้คืนเต็ม ${baht(d.buyer_pay)}</b></div>
       ${m === 'card' ? `<div class="r small"><span class="muted">ค่าธรรมเนียมบัตร</span><span>ไม่คืนทุกกรณี</span></div>` : ''}
       ${isStay(d) ? '' : '<div class="r small"><span class="muted">หลังผู้ขายส่งของแล้ว</span><span>ยกเลิกไม่ได้ · ยืนยันรับของ หรือแจ้งปัญหา</span></div>'}</div>`;
-    $('#payBtn').innerHTML = `${ic('check', 20)}จำลองว่าจ่ายแล้ว · ${baht(o.total)}`;
+    $('#payBtn').innerHTML = st && m === 'card' ? `${ic('check', 20)}ไปหน้าจ่ายบัตร Stripe (ทดสอบ) · ${baht(o.total)}` : `${ic('check', 20)}จำลองว่าจ่ายแล้ว · ${baht(o.total)}`;
   };
   $$('#payMethod button').forEach(b => b.onclick = () => { S.payM = b.dataset.m; draw(); });
   draw();
 }
 function paySubmit(btn) {
+  const d = S.deal;
+  if (S.payM === 'card' && d.stripe && d.stripe.enabled) return busy(btn, async () => { const r = await api(`/deals/${d.code}/stripe-checkout`, {}); location.href = r.url; });
   busy(btn, async () => { await api(`/deals/${S.deal.code}/pay`, {method: S.payM || 'promptpay'}); closeSheet(); toast('ชำระเงินสำเร็จ (จำลอง) เงินถูกพักไว้แล้ว'); S.payM = null; await refreshDeal(); });
 }
 function clipsCard(d, role, st) {
@@ -1278,7 +1282,7 @@ function stayParts(d, c) {
   it.push({t: 'ถึงเวลาเช็คอิน', m: dCin(cin), done: t >= cin || !!d.completed_at,
     x: st === 'held' && beforeIn ? `<div class="countdown">⏳ อีก <b data-until-short="${cin}">${durShort(cin - t)}</b> ถึงเวลาเช็คอิน</div>` : ''});
   if (d.disputed_at) it.push({t: d.dispute_reason === 'ขอยกเลิกหลังหมดเวลายกเลิกฟรี' ? 'ผู้เข้าพักขอยกเลิก (เลยช่วงยกเลิกฟรี)' : 'ผู้เข้าพักแจ้งปัญหา', m: `${dTime(d.disputed_at)} · ${esc(d.dispute_reason)}`, done: st !== 'disputed', now: st === 'disputed'});
-  if (st === 'refunded') it.push({t: {host_cancel: 'เจ้าของที่พักยกเลิก · คืนเงินเต็มจำนวน', guest_cancel: 'ผู้เข้าพักยกเลิกในช่วงยกเลิกฟรี · คืนเงินหักค่าดำเนินการ'}[d.resolution] || (d.cancel_charge > 0 ? 'คืนเงินผู้เข้าพัก (หักค่าดำเนินการ)' : 'คืนเงินผู้เข้าพักเต็มจำนวน'), m: `${dTime(d.refunded_at)} · ${baht(d.refund_amount)}${d.cancel_charge > 0 ? ' · ค่าดำเนินการ ' + baht(d.cancel_charge) : ''} (จำลอง)`, done: true});
+  if (st === 'refunded') it.push({t: {host_cancel: 'เจ้าของที่พักยกเลิก · คืนเงินเต็มจำนวน', guest_cancel: 'ผู้เข้าพักยกเลิกในช่วงยกเลิกฟรี · คืนเงินหักค่าดำเนินการ'}[d.resolution] || (d.cancel_charge > 0 ? 'คืนเงินผู้เข้าพัก (หักค่าดำเนินการ)' : 'คืนเงินผู้เข้าพักเต็มจำนวน'), m: `${dTime(d.refunded_at)} · ${baht(d.refund_amount)}${d.cancel_charge > 0 ? ' · ค่าดำเนินการ ' + baht(d.cancel_charge) : ''} ${simTag(d, 1)}`, done: true});
   else if (st === 'cancelled') it.push({t: 'ยกเลิกดีล', m: dTime(d.cancelled_at), done: true});
   else {
     it.push({t: st === 'partial' ? 'ทีมงานตัดสินแบ่งเงิน' : 'ผู้เข้าพักยืนยันเช็คอิน', m: d.completed_at ? `${dTime(d.completed_at)} · ${{guest_checkin: 'กด “เช็คอินแล้ว ที่พักตรงปก”', checkin_code: 'กรอกรหัสเช็คอินถูกต้อง', auto: 'ระบบปล่อยเงินอัตโนมัติ (24 ชม. หลังเวลาเช็คอิน)', admin: 'ทีมงานตัดสินให้ปล่อยเงิน'}[d.release_reason] || 'คืนผู้เข้าพัก ' + baht(d.refund_amount)}` : `กดยืนยัน หรือกรอกรหัส 4 หลัก · อัตโนมัติ ${dFull(d.release_at)}`, done: !!d.completed_at});
@@ -1991,6 +1995,12 @@ setInterval(async () => {
   const m = location.pathname.match(/^\/(d|s)\/([A-Za-z0-9-]+)/);
   if (m) history.replaceState(null, '', '/#/' + (m[1] === 'd' ? 'd/' + m[2].toUpperCase() : 'shop/' + m[2]));
   try { await loadMe(); } catch (e) { /* offline */ }
+  const sp = new URLSearchParams(location.search).get('stripe_session');
+  if (sp) {  // กลับจาก Stripe Checkout: ให้เซิร์ฟเวอร์ดึง session จาก Stripe มาตรวจเอง
+    const code = (location.hash.match(/#\/d\/([A-Z0-9-]+)/) || [])[1];
+    history.replaceState(null, '', '/' + location.hash);
+    if (code) try { const r = await api(`/deals/${code}/stripe-confirm`, {session_id: sp}); toast(r.ok ? 'ชำระเงินด้วยบัตรทดสอบ Stripe สำเร็จ เงินถูกพักไว้แล้ว' : 'Stripe ยังไม่ยืนยันการจ่าย ลองรีเฟรชอีกครั้ง'); } catch (e) { handleErr(e); }
+  }
   window.addEventListener('hashchange', () => { navDepth++; render(); });
   render();
 })();
