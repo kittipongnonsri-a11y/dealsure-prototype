@@ -51,9 +51,9 @@ for label, kw, msg in [('ไม่มีลิงก์แผนที่', {'ma
     s, e = H.req('/deals', stay(H, **kw))
     check(f'ปฏิเสธ: {label}', s == 400 and msg in e['error'], e)
 s, e = H.req('/deals', stay(H, price=3500))
-check('เกิน 3,000 ต้องยืนยันตัวตน (กฎเดิม)', s == 403 and 'ยืนยันตัวตน' in e['error'])
+check('v13: ร้านใหม่ (ขายสำเร็จยังไม่ครบ 5 ดีล) เกิน 3,000 ไม่ได้', s == 400 and 'ร้านใหม่' in e['error'] and '3,000' in e['error'], e)
 s, e = H.req('/deals', stay(H, price=6000))
-check('ผู้ใช้ใหม่เกิน 5,000 ไม่ได้ (กฎเดิม)', s == 400 and '5,000' in e['error'])
+check('ผู้ใช้ใหม่เกิน 5,000 ไม่ได้ (กฎเดิม)', s == 400 and '5,000' in e['error'], e)
 
 print('3) เจ้าของสร้างดีล → ผู้เข้าพักเปิดลิงก์ → จ่าย → พักเงินรอเช็คอิน')
 code = mk(H)

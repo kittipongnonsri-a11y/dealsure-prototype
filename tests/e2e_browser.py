@@ -180,11 +180,13 @@ with sync_playwright() as p:
 
     print('11) ยืนยันตัวตน (ทดสอบ) สำหรับดีลเกิน 3,000')
     create_deal(S, 'เลนส์กล้อง (ทดสอบ)', 4200)
+    expect(S.locator('#newSellerLimit')).to_contain_text('3,000')  # v13: ร้านใหม่ < 5 ดีลสำเร็จ สูงสุด 3,000
+    S.click('#roleSeg [data-v=buyer]'); S.fill('#price', '4200')  # ฝั่งผู้ซื้อ (วงเงิน 5,000) ยังต้องยืนยันตัวตนเมื่อเกิน 3,000
     wait_text(S, 'ต้องยืนยันตัวตน'); S.locator('#limitNotes').scroll_into_view_if_needed(); shot(S, '29-over-3000-needs-id')
     S.click('#limitNotes >> text=ยืนยันเลย'); upload(S, '#idBox', os.path.join(HERE, 'fake-id.jpg')); S.wait_for_selector('#idBox img')
     shot(S, '30-id-verify-test')
     S.click('text=ส่งยืนยันตัวตน (ทดสอบ)'); wait_text(S, 'คุณยืนยันตัวตนแล้ว')
-    S.fill('#price', '6000'); wait_text(S, 'วงเงินของร้านระดับ Bronze'); S.locator('#limitNotes').scroll_into_view_if_needed(); shot(S, '31-new-user-limit-5000')
+    S.click('#roleSeg [data-v=seller]'); S.fill('#price', '6000'); wait_text(S, 'วงเงินของร้านระดับ Bronze คือ 5,000'); S.locator('#limitNotes').scroll_into_view_if_needed(); shot(S, '31-new-user-limit-5000')
 
     print('12) โปรไฟล์ / บัญชี / ร้านของฉัน')
     B.goto(BASE + '/#/me'); wait_text(B, 'บัญชีของฉัน')

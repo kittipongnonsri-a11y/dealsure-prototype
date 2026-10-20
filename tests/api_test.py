@@ -146,8 +146,8 @@ ADM.ok(f'/admin/deals/{codes[0]}/resolve', {'decision': 'partial', 'refund_amoun
 ADM.ok(f'/admin/deals/{codes[1]}/resolve', {'decision': 'refund'})
 ADM.ok(f'/admin/deals/{codes[2]}/resolve', {'decision': 'release'})
 d0, d1, d2 = deal(A, codes[0]), deal(A, codes[1]), deal(A, codes[2])
-# v12: คืนบางส่วน → ค่าธรรมเนียมคิดจากยอดที่ผู้ขายได้จริง: (1522.50−500)=1022.50 · ค่าธรรมเนียม 3% = 30.68 · ผู้ขายได้ 991.82
-check('คืนบางส่วน: ผู้ซื้อได้ 500 ผู้ขายได้ 991.82 (ค่าธรรมเนียม 3% = 30.68 จากยอดที่ผู้ขายได้)', d0['status'] == 'partial' and d0['refund_amount'] == 500 and abs(d0['fee_charged'] - 30.68) < 0.011 and abs(d0['payout_amount'] - (1022.5 - d0['fee_charged'])) < 0.001, d0)
+# v13: คืนบางส่วน → ค่าธรรมเนียมเต็มของดีล 45 (3% ของ 1,500) · ส่วนผู้ซื้อ 22.50 ไม่คืน · ผู้ขายได้ 1,500 − 500 − 22.50 = 977.50
+check('คืนบางส่วน: ผู้ซื้อได้ 500 ผู้ขายได้ 977.50 (ค่าธรรมเนียมเต็ม 45)', d0['status'] == 'partial' and d0['refund_amount'] == 500 and d0['payout_amount'] == 977.5 and d0['fee_charged'] == 45, d0)
 check('คืนเต็ม', d1['status'] == 'refunded' and d1['refund_amount'] == 1522.5)
 check('ปล่อยเงิน', d2['status'] == 'completed' and d2['release_reason'] == 'admin')
 

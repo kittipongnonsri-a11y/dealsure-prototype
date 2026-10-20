@@ -11,7 +11,7 @@ if not BASE.startswith(('http://localhost', 'http://127.0.0.1')): sys.exit('ร�
 OUT = os.path.join(HERE, '..', 'screenshots', 'v6')
 os.makedirs(OUT, exist_ok=True)
 shots = []
-RULE = 'ค่าโอนออก 30 บาท/วัน ฟรีเมื่อยอดรวม 1,000 บาทขึ้นไป'
+RULE = 'ค่าโอนออก 30 บาท/วัน ฟรีเมื่อยอดรวม 3,000 บาทขึ้นไป'
 
 
 def snap(pg, name, full=False, el=None):
@@ -49,7 +49,7 @@ with sync_playwright() as p:
     S.click('#createBtn'); wait_text(S, 'ยอดดีลขั้นต่ำ 100 บาท')
     S.fill('#price', '1500')
     expect(S.locator('#fPayout')).to_contain_text(RULE)
-    expect(S.locator('#fCancel')).to_contain_text('ค่าดำเนินการ 30.45 ฿')
+    expect(S.locator('#fCancel')).to_contain_text('ค่าดำเนินการ 31.95 ฿')
     expect(S.locator('#fCancel')).to_contain_text('ได้คืนเต็ม 1,522.50 ฿')
     S.locator('#feeSeg').scroll_into_view_if_needed(); S.evaluate("document.querySelector('#feeSeg').closest('.card').scrollIntoView({block:'start'})")
     snap(S, '01-create-fee-breakdown')
@@ -59,27 +59,18 @@ with sync_playwright() as p:
     print('2) ผู้ซื้อรับดีล → หน้าจ่ายเงินแสดงค่าใช้จ่ายทั้งหมดก่อนจ่าย')
     B.goto(link); B.click('text=เข้าสู่ระบบเพื่อรับดีล'); login(B, 'ผู้ซื้อ v6 (ทดสอบ)', '0872' + stamp)
     B.goto(link); B.click('text=รับดีล แล้วไปจ่ายเงิน'); B.wait_for_selector('text=จ่ายด้วย')
-    B.click('text=จ่ายด้วย'); expect(B.locator('#payCharges')).to_contain_text('ค่าดำเนินการ 30.45 ฿')
-    expect(B.locator('#payCharges')).to_contain_text(RULE)
+    B.click('text=จ่ายด้วย'); expect(B.locator('#payCharges')).to_contain_text('ค่าดำเนินการ 31.95 ฿')
+    expect(B.locator('#payCharges')).to_contain_text('ค่าธรรมเนียมบัตร')
     B.evaluate("document.querySelector('#payCharges').scrollIntoView({block:'center'})"); snap(B, '02-pay-sheet-all-charges')
     B.click('#payBtn'); B.wait_for_selector('#buyerCancelBtn')
 
     print('3) ผู้ซื้อยกเลิกก่อนผู้ขายส่งของ → หน้ายืนยันแสดงค่าดำเนินการ')
-    expect(B.locator('#buyerCancelBtn')).to_contain_text('ค่าดำเนินการ 30.45 ฿')
-    B.click('#buyerCancelBtn'); expect(B.locator('#cancelBreak')).to_contain_text('−30.45 ฿')
-    expect(B.locator('#cancelBreak')).to_contain_text('1,492.05 ฿'); expect(B.locator('#cxBtn')).to_contain_text('รับคืน 1,492.05 ฿')
+    expect(B.locator('#buyerCancelBtn')).to_contain_text('ค่าดำเนินการ 31.95 ฿')
+    B.click('#buyerCancelBtn'); expect(B.locator('#cancelBreak')).to_contain_text('−31.95 ฿')
+    expect(B.locator('#cancelBreak')).to_contain_text('1,490.55 ฿'); expect(B.locator('#cxBtn')).to_contain_text('รับคืน 1,490.55 ฿')
     snap(B, '03-buyer-cancel-sheet-with-charge')
-    B.click('#cxBtn'); wait_text(B, 'หักค่าดำเนินการ 30.45 ฿')
+    B.click('#cxBtn'); wait_text(B, 'หักค่าดำเนินการ 31.95 ฿')
     snap(B, '04-buyer-cancelled-refund-minus-charge')
-
-    print('4) ผู้ขายยกเลิกหลังผู้ซื้อจ่าย → หน้ายืนยันแสดงค่าปรับ')
-    code2 = api_deal(S, B, 2000)
-    S.goto(BASE + '/#/d/' + code2); S.wait_for_selector('#sellerCancelBtn')
-    expect(S.locator('#sellerCancelBtn')).to_contain_text('ค่าปรับ 60 ฿')
-    S.click('#sellerCancelBtn'); expect(S.locator('#cancelBreak')).to_contain_text('2,030 ฿'); expect(S.locator('#cancelBreak')).to_contain_text('60 ฿')
-    snap(S, '05-seller-cancel-sheet-penalty')
-    S.click('#cxBtn'); wait_text(S, 'หักจากยอดโอนรอบถัดไป')
-    snap(S, '06-seller-deal-penalty-note')
 
     print('5) หลังผู้ขายส่งของ ผู้ซื้อไม่มีปุ่มยกเลิก')
     code3 = api_deal(S, B, 900, ship=True)
@@ -88,13 +79,22 @@ with sync_playwright() as p:
     snap(B, '07-buyer-after-ship-no-cancel')
     B.evaluate(f"api('/deals/{code3}/confirm', {{}})")
 
+    print('4) ผู้ขายยกเลิกหลังผู้ซื้อจ่าย → หน้ายืนยันแสดงค่าปรับ')
+    code2 = api_deal(S, B, 2000)
+    S.goto(BASE + '/#/d/' + code2); S.wait_for_selector('#sellerCancelBtn')
+    expect(S.locator('#sellerCancelBtn')).to_contain_text('ค่าปรับ 60 ฿')
+    S.click('#sellerCancelBtn'); expect(S.locator('#cancelBreak')).to_contain_text('2,030 ฿'); expect(S.locator('#cancelBreak')).to_contain_text('60 ฿')
+    snap(S, '05-seller-cancel-sheet-penalty')
+    S.click('#cxBtn'); wait_text(S, 'หักจากยอดรอโอนทันที')
+    snap(S, '06-seller-deal-penalty-note')
+
     print('6) หน้าเงินขายของฉัน: ยอดรวม − ค่าโอนออก − ค่าปรับ')
     S.goto(BASE + '/#/me'); S.wait_for_selector('#payoutCard')
-    expect(S.locator('#payBreak')).to_contain_text('−30 ฿')        # 886.50 < 1,000 → ค่าโอนออก 30
-    expect(S.locator('#payBreak')).to_contain_text('−60 ฿')        # ค่าปรับ 60
+    expect(S.locator('#payBreak')).to_contain_text('−30 ฿')        # 826.50 < 3,000 → ค่าโอนออก 30
+    expect(S.locator('#payBreak')).to_contain_text('826.50 ฿')     # v13: ค่าปรับ 60 หักจากยอดรอโอนทันที 886.50 → 826.50
     expect(S.locator('#payBreak')).to_contain_text(RULE)
-    expect(S.locator('#penaltyBox')).to_contain_text('ค่าปรับค้างหัก 60 ฿')
-    expect(S.locator('#payNet')).to_have_text('796.50 ฿')          # 886.50 − 30 − 60
+    expect(S.locator('#penaltyBox')).to_contain_text('หักแล้ว')
+    expect(S.locator('#payNet')).to_have_text('796.50 ฿')          # 826.50 − ค่าโอน 30
     S.evaluate("document.querySelector('#payoutCard').scrollIntoView({block:'start'})")
     snap(S, '08-seller-payout-fee-penalty')
     snap(S, '08b-seller-payout-card', el='#payoutCard')
@@ -103,8 +103,8 @@ with sync_playwright() as p:
     B.goto(BASE + '/terms'); B.wait_for_selector('#s6')
     html = B.content()
     assert '[ร่าง:' not in html and 'อาจปรับก่อนเปิดใช้งานจริง' not in html, 'ยังมีหมายเหตุร่าง'
-    expect(B.locator('#s6')).to_contain_text('ค่าดำเนินการ 2% ของยอดที่ผู้ซื้อจ่าย ขั้นต่ำ 10 บาท')
-    expect(B.locator('#s6')).to_contain_text('ไม่มีค่าโอนออกเมื่อยอดรวมของวันนั้นตั้งแต่ 1,000 บาทขึ้นไป')
+    expect(B.locator('#s6')).to_contain_text('ค่าที่สูงสุดระหว่าง 10 บาท, 2% ของยอดที่ผู้ซื้อจ่าย')
+    expect(B.locator('#s6')).to_contain_text('ไม่มีค่าโอนออกเมื่อยอดรวมของวันนั้นตั้งแต่ 3,000 บาทขึ้นไป')
     expect(B.locator('.legal-sum')).to_contain_text('ผู้ซื้อยกเลิกไม่ได้')
     B.evaluate("document.querySelector('#s6').scrollIntoView({block:'start'})"); snap(B, '09-terms-fee-section')
     snap(B, '09b-terms-fee-section-full', el='#s6')

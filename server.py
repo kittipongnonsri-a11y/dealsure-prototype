@@ -27,8 +27,21 @@ HOUR, DAY = 3600, 86400
 # ---- business rules ----
 FEE_RATE, FEE_MIN = 0.03, 20
 MIN_PRICE, MAX_PRICE = 100, 1_000_000   # ยอดดีลขั้นต่ำ 100 บาท (ยืนยันโดยเจ้าของ ต.ค. 2569)
-PAYOUT_FEE, PAYOUT_FREE_FROM = 30, 1000  # ค่าโอนออก 30 บาท/วัน (ผู้ขายจ่าย หักจากยอดรวมโอนรายวัน) ฟรีเมื่อยอดรวม ≥ 1,000 บาท
-CANCEL_RATE, CANCEL_MIN = 0.02, 10       # ผู้ซื้อยกเลิกเอง: ค่าดำเนินการ 2% ของยอดที่จ่าย ขั้นต่ำ 10 บาท
+# ---- ต้นทุนผู้ให้บริการรับชำระเงิน (สมมติฐาน · ยังไม่ได้เลือกผู้ให้บริการ) ----
+# แก้ตรงนี้ที่เดียวเมื่อเลือกผู้ให้บริการจริง (Omise / Stripe / Beam / Ksher …) ตัวเลขด้านล่างใช้กรณีแย่สุดจาก
+# /workspace/dealsure-docs/profit-loss-check-2026-10-20.md (ยังไม่จด VAT → VAT ของผู้ให้บริการเป็นต้นทุนเรา)
+PROVIDER_COST = dict(
+    promptpay_pct=1.77,          # % ของยอดที่รับผ่าน PromptPay (เช่น Omise/Stripe 1.65% + VAT 7%)
+    card_pct=round(3.65 * 1.07, 4),  # % ของยอดที่รับผ่านบัตร (3.65% + VAT 7% ≈ 3.91%)
+    card_fixed=round(10 * 1.07, 2),  # บาท/รายการบัตร (10 บาท + VAT ≈ 10.70)
+    payout_fixed=30,             # บาท/ครั้งที่โอนออกให้ผู้ขาย
+)
+CARD_SURCHARGE_PCT, CARD_SURCHARGE_FIXED = 4.0, 11  # ค่าธรรมเนียมบัตร ผู้ซื้อจ่ายเพิ่มเมื่อเลือกจ่ายด้วยบัตร (ไม่คืนทุกกรณี) · PromptPay ไม่มี
+CANCEL_COST_BUFFER = 5                              # ค่าดำเนินการตอนยกเลิกต้องไม่น้อยกว่า ต้นทุนรับเงินจริง + 5 บาท
+PAY_METHODS = ('promptpay', 'card')
+PAYOUT_FEE, PAYOUT_FREE_FROM = PROVIDER_COST['payout_fixed'], 3000  # ค่าโอนออก 30 บาท/วัน (ผู้ขายจ่าย) ฟรีเมื่อยอดรวม ≥ 3,000 บาท (วันนั้น DealSure จ่ายค่าโอนให้)
+CANCEL_RATE, CANCEL_MIN = 0.02, 10       # ผู้ซื้อยกเลิกเอง: ค่าดำเนินการ = max(10, 2% ของยอดที่จ่าย, ต้นทุนรับเงินจริง + 5)
+NEW_SELLER_DEALS, NEW_SELLER_LIMIT = 5, 3000  # ผู้ขายที่ขายสำเร็จยังไม่ครบ 5 ดีล: สูงสุด 3,000 บาท/ดีล (ใช้ค่าที่ต่ำกว่าเมื่อเทียบกับวงเงินระดับร้าน)
 PENALTY_FLAG_N, PENALTY_FLAG_DAYS = 3, 30  # ผู้ขายโดนค่าปรับ ≥3 ครั้งใน 30 วัน → แจ้งเตือนแอดมิน
 LOST_FLAG_N, LOST_FLAG_DAYS = 3, 90        # ผู้ซื้อแพ้ข้อพิพาท ≥3 ครั้งใน 90 วัน → เสนอระงับบัญชีในหน้าแอดมิน
 ID_REQUIRED_OVER = 3000
@@ -130,7 +143,8 @@ def _migrate():
             ('products', 'host_contact', 'TEXT'),
             ('users', 'socials', "TEXT DEFAULT '{}'"), ('reviews', 'photos', "TEXT DEFAULT '[]'"),
             ('deals', 'cancel_charge', 'REAL'), ('deals', 'fee_charged', 'REAL'), ('deals', 'penalty', 'REAL'), ('deals', 'fault', 'TEXT'),
-            ('payouts', 'batch_id', 'INTEGER'),
+            ('payouts', 'batch_id', 'INTEGER'), ('payouts', 'pen_ded', 'REAL DEFAULT 0'),
+            ('deals', 'pay_method', 'TEXT'), ('deals', 'card_fee', 'REAL DEFAULT 0'),
             ('deals', 'pack_video', 'TEXT'), ('deals', 'unbox_video', 'TEXT'), ('deals', 'unbox_requested_at', 'REAL'), ('deals', 'pack_requested_at', 'REAL'))
     for table, col, typ in cols:
         if col not in [r[1] for r in db.execute(f'PRAGMA table_info({table})')]:
@@ -167,16 +181,40 @@ def calc_fee(price, payer):
     return dict(fee=fee, buyer_fee=bf, seller_fee=sf, buyer_pay=money(price + bf), seller_get=money(price - sf))
 
 
-def cancel_charge(paid):
-    """ค่าดำเนินการเมื่อผู้ซื้อยกเลิกเอง: 2% ของยอดที่จ่าย ขั้นต่ำ 10 บาท (ไม่เกินยอดที่จ่าย)"""
-    return money(min(paid, max(CANCEL_MIN, paid * CANCEL_RATE)))
+def card_surcharge(paid):
+    """ค่าธรรมเนียมบัตร (ผู้ซื้อจ่ายเพิ่ม ไม่คืนทุกกรณี)"""
+    return money(paid * CARD_SURCHARGE_PCT / 100 + CARD_SURCHARGE_FIXED)
 
 
-def partial_split(buyer_pay, refund):
-    """คืนบางส่วน: ค่าธรรมเนียมคิดจากยอดที่ผู้ขายได้จริงเท่านั้น (3% ขั้นต่ำ 20 บาท)"""
-    kept = money(buyer_pay - refund)
-    fee = money(min(kept, max(FEE_MIN, kept * FEE_RATE)))
-    return dict(kept=kept, fee=fee, pay=money(kept - fee))
+def payment_cost(paid, method='promptpay', card_fee=0):
+    """ต้นทุนรับเงินโดยประมาณที่ DealSure จ่ายผู้ให้บริการ และยังไม่ได้ถูกชดเชยด้วยค่าธรรมเนียมบัตร"""
+    if method == 'card':
+        cost = (paid + card_fee) * PROVIDER_COST['card_pct'] / 100 + PROVIDER_COST['card_fixed']
+        return money(max(0.0, cost - card_fee))
+    return money(paid * PROVIDER_COST['promptpay_pct'] / 100)
+
+
+def cancel_charge(paid, method='promptpay', card_fee=0):
+    """ค่าดำเนินการเมื่อผู้ซื้อ/ผู้เข้าพักยกเลิกเอง = max(10, 2% ของยอดที่จ่าย, ต้นทุนรับเงินจริง + 5) ไม่เกินยอดที่จ่าย
+    (ค่าธรรมเนียมบัตรไม่คืนอยู่แล้ว จึงไม่นับรวมในยอดที่จ่าย)"""
+    return money(min(paid, max(CANCEL_MIN, paid * CANCEL_RATE, payment_cost(paid, method, card_fee) + CANCEL_COST_BUFFER)))
+
+
+def deal_cancel_charge(d):
+    return cancel_charge(d['buyer_pay'], d['pay_method'] or 'promptpay', d['card_fee'] or 0)
+
+
+def partial_max_refund(d):
+    """คืนบางส่วนได้สูงสุด = ราคาดีล − ค่าธรรมเนียมส่วนของผู้ขาย (ค่าธรรมเนียมส่วนผู้ซื้อไม่คืน)"""
+    return money(d['price'] - d['seller_fee'])
+
+
+def partial_split(d, refund):
+    """คืนบางส่วน: ค่าธรรมเนียมคือค่าธรรมเนียมเต็มของดีลเดิม (3% ของราคาเต็ม ขั้นต่ำ 20) ไม่ลดตามยอดที่ผู้ขายได้
+    แบ่งรับภาระตามที่ตกลงตอนสร้างดีล: ส่วนของผู้ซื้อไม่คืน (อยู่ในยอดที่จ่ายแล้ว) · ส่วนของผู้ขายหักจากเงินที่ผู้ขายได้
+    ผู้ขายได้ = ราคาดีล − เงินคืนผู้ซื้อ − ค่าธรรมเนียมส่วนผู้ขาย"""
+    pay = money(d['price'] - refund - d['seller_fee'])
+    return dict(kept=money(d['buyer_pay'] - refund), fee=money(d['fee']), pay=max(0.0, pay))
 
 
 def payout_calc(gross, owed):
@@ -192,6 +230,31 @@ def payout_calc(gross, owed):
 def penalty_owed(uid):
     r = q1("SELECT COALESCE(SUM(amount - deducted),0) s FROM records WHERE user_id=? AND kind='penalty'", (uid,))
     return money(r['s'])
+
+
+def settle_penalties(uid):
+    """หักค่าปรับค้างจากยอดรอโอนของผู้ขายทันที (ไม่ต้องรอรอบโอน) · คืนค่าที่หักได้"""
+    owed = penalty_owed(uid)
+    if owed <= 0: return 0.0
+    took = 0.0
+    for p in q("SELECT id, amount, COALESCE(pen_ded,0) pd FROM payouts WHERE user_id=? AND status='pending' AND amount>0 ORDER BY id", (uid,)):
+        if owed <= 0: break
+        x = money(min(owed, p['amount'])); owed = money(owed - x); took = money(took + x)
+        ex('UPDATE payouts SET amount=?, pen_ded=? WHERE id=?', (money(p['amount'] - x), money(p['pd'] + x), p['id']))
+    left = took
+    for pr in q("SELECT id, amount, deducted FROM records WHERE user_id=? AND kind='penalty' AND deducted < amount ORDER BY id", (uid,)):
+        if left <= 0: break
+        x = money(min(left, pr['amount'] - pr['deducted'])); left = money(left - x)
+        ex('UPDATE records SET deducted=? WHERE id=?', (money(pr['deducted'] + x), pr['id']))
+    if took: notify(uid, None, f'หักค่าปรับ {fmt_baht(took)} จากยอดรอโอนของคุณแล้ว' + (f' · ยังค้างอีก {fmt_baht(penalty_owed(uid))}' if penalty_owed(uid) > 0 else ''), 'warn')
+    return took
+
+
+def penalty_block_msg(owed, own=True):
+    if own:
+        return (f'คุณมีค่าปรับค้างชำระ {fmt_baht(owed)} · ต้องชำระให้ครบก่อน จึงจะสร้างหรือรับดีลใหม่ และรับเงินโอนออกได้ '
+                '(ไปที่ บัญชี → เงินขายของฉัน → ชำระค่าปรับ หรือรอให้ระบบหักจากยอดขายที่รอโอน)')
+    return 'ร้านนี้ปิดรับดีลใหม่ชั่วคราว (มีค่าปรับค้างชำระ) ลองใหม่ภายหลังนะ'
 
 
 def due_ts(due_date):
@@ -488,12 +551,15 @@ def user_stats(uid):
         if sales >= mn and rating is not None and rating >= ms and disp_rate <= md:
             level, level_name, limit = key, nm, lim
             break
+    level_limit = limit
+    new_seller = sales < NEW_SELLER_DEALS
+    if new_seller: limit = min(limit, NEW_SELLER_LIMIT)  # ผู้ขายใหม่: ใช้ค่าที่ต่ำกว่า
     buyer_limit = NEW_LIMIT if (sales + buys) < 5 else 50000
     return dict(sales=sales, buys=buys, total=sales + buys, rating=rating, reviews=rs['n'], rating_dist=dist,
                 buyer_rating=round(rb['a'], 2) if rb['n'] else None, buyer_reviews=rb['n'],
                 dispute_rate=round(disp_rate * 100, 1), disputes=r['seller_disputes'],
                 on_time_rate=round(100 * r['on_time_n'] / r['shipped_n']) if r['shipped_n'] else None,
-                level=level, level_name=level_name, seller_limit=limit, buyer_limit=buyer_limit, stays_hosted=r['stays'])
+                level=level, level_name=level_name, seller_limit=limit, level_limit=level_limit, new_seller=new_seller, buyer_limit=buyer_limit, stays_hosted=r['stays'])
 
 
 def public_user(u, stats=True):
@@ -521,6 +587,7 @@ def complete(d, reason, at=None):
     ex("UPDATE deals SET status='completed', completed_at=?, release_reason=?, payout_amount=?, on_time=? WHERE id=?",
        (at, reason, d['seller_get'], on_time, d['id']))
     ex('INSERT INTO payouts(user_id,deal_id,amount,created_at) VALUES(?,?,?,?)', (d['seller_id'], d['id'], d['seller_get'], now()))
+    settle_penalties(d['seller_id'])
     why = {'buyer_confirm': 'ผู้ซื้อยืนยันรับของแล้ว', 'meet_code': 'ยืนยันด้วยรหัสนัดรับแล้ว',
            'guest_checkin': 'ผู้เข้าพักยืนยันเช็คอินแล้ว ที่พักตรงปก', 'checkin_code': 'ผู้เข้าพักกรอกรหัสเช็คอินถูกต้อง',
            'auto': 'ครบกำหนดเวลา ระบบปล่อยเงินอัตโนมัติ', 'admin': 'ทีมงานตัดสินให้ปล่อยเงิน'}.get(reason, '')
@@ -534,13 +601,14 @@ def refund_seller_fault(d, t, resolution, note=None):
     ex("""UPDATE deals SET status='refunded', refunded_at=?, refund_amount=?, resolution=?, resolution_note=COALESCE(?, resolution_note),
           fault='seller', penalty=?, fee_charged=0, cancel_charge=0 WHERE id=?""", (t, d['buyer_pay'], resolution, note, pen, d['id']))
     ex("INSERT INTO records(user_id,deal_id,kind,amount,reason,created_at) VALUES(?,?,'penalty',?,?,?)", (d['seller_id'], d['id'], pen, resolution, now()))
-    notify(d['seller_id'], d['code'], f'ค่าปรับ {fmt_baht(pen)} (เท่าค่าธรรมเนียมดีล "{d["title"]}") จะหักจากยอดโอนรอบถัดไป', 'warn')
+    notify(d['seller_id'], d['code'], f'ค่าปรับ {fmt_baht(pen)} (เท่าค่าธรรมเนียมดีล "{d["title"]}") หักจากยอดรอโอนของคุณทันที · ถ้ายอดไม่พอ ต้องชำระส่วนที่ค้างก่อนสร้างดีลใหม่หรือรับเงินโอนออก', 'warn')
+    settle_penalties(d['seller_id'])
     return pen
 
 
 def refund_buyer_choice(d, t, resolution, note=None):
     """ผู้ซื้อ/ผู้เข้าพักยกเลิกเอง: คืนเงินหักค่าดำเนินการ 2% ของยอดที่จ่าย ขั้นต่ำ 10 บาท"""
-    ch = cancel_charge(d['buyer_pay']); back = money(d['buyer_pay'] - ch)
+    ch = deal_cancel_charge(d); back = money(d['buyer_pay'] - ch)
     ex("""UPDATE deals SET status='refunded', refunded_at=?, refund_amount=?, resolution=?, resolution_note=COALESCE(?, resolution_note),
           fault='buyer', cancel_charge=?, fee_charged=0, penalty=0 WHERE id=?""", (t, back, resolution, note, ch, d['id']))
     notify(d['buyer_id'], d['code'], f'คืนเงิน {fmt_baht(back)} ให้คุณแล้ว (จำลอง) · หักค่าดำเนินการ {fmt_baht(ch)}', 'wallet')
@@ -554,12 +622,12 @@ def cancel_preview(d, role, t):
         if role == 'seller': return dict(type='seller_fault', refund=d['buyer_pay'], penalty=money(d['fee']))
         if t >= d['checkin_at']: return None
         if t <= d['checkin_at'] - (d['free_cancel_days'] or 0) * DAY:
-            ch = cancel_charge(d['buyer_pay']); return dict(type='buyer_choice', paid=d['buyer_pay'], charge=ch, refund=money(d['buyer_pay'] - ch))
+            ch = deal_cancel_charge(d); return dict(type='buyer_choice', paid=d['buyer_pay'], charge=ch, refund=money(d['buyer_pay'] - ch), card_fee=d['card_fee'] or 0)
         return dict(type='staff', paid=d['buyer_pay'])
     if role == 'seller': return dict(type='seller_fault', refund=d['buyer_pay'], penalty=money(d['fee']))
     if t > due_ts(d['due_date']): return dict(type='seller_fault', refund=d['buyer_pay'], penalty=money(d['fee']))
-    ch = cancel_charge(d['buyer_pay'])
-    return dict(type='buyer_choice', paid=d['buyer_pay'], charge=ch, refund=money(d['buyer_pay'] - ch))
+    ch = deal_cancel_charge(d)
+    return dict(type='buyer_choice', paid=d['buyer_pay'], charge=ch, refund=money(d['buyer_pay'] - ch), card_fee=d['card_fee'] or 0)
 
 
 def process(d):
@@ -646,7 +714,11 @@ def deal_view(d, me):
                    release_at=d['auto_release_at'] or cin + STAY_RELEASE)
     if party:
         out['cancel_preview'] = cancel_preview(d, role, t)
-        out['buyer_cancel_charge'] = cancel_charge(d['buyer_pay'])
+        out['buyer_cancel_charge'] = deal_cancel_charge(d)
+        if d['status'] == 'accepted' and role == 'buyer':  # ตัวเลือกวิธีจ่าย: แสดงยอดจริงของแต่ละวิธีก่อนจ่าย
+            cf = card_surcharge(d['buyer_pay'])
+            out['pay_options'] = dict(promptpay=dict(surcharge=0, total=d['buyer_pay'], cancel_charge=cancel_charge(d['buyer_pay'])),
+                                      card=dict(surcharge=cf, total=money(d['buyer_pay'] + cf), cancel_charge=cancel_charge(d['buyer_pay'], 'card', cf)))
     out['payout_rule'] = dict(fee=PAYOUT_FEE, free_from=PAYOUT_FREE_FROM)
     out.update(my_role=role, actions=acts, deal_now=t, due_ts=due_ts(d['due_date']), overdue=overdue,
                dispute_until=dispute_until, is_creator=bool(uid and d['creator_id'] == uid))
@@ -670,12 +742,17 @@ def require_party(d, me, role=None):
     return r
 
 
-def check_limits(user, role, price):
+def check_limits(user, role, price, own=True):
+    owed = penalty_owed(user['id'])
+    if owed > 0: raise ApiError(penalty_block_msg(owed, own), 403)
     s = user_stats(user['id'])
     lim = s['seller_limit'] if role == 'seller' else s['buyer_limit']
     if price > lim:
+        if role == 'seller' and s['new_seller'] and price <= s['level_limit']:
+            raise ApiError(f'ร้านใหม่ (ขายสำเร็จยังไม่ครบ {NEW_SELLER_DEALS} ดีล) สร้างดีลได้สูงสุด {NEW_SELLER_LIMIT:,} บาท/ดีล — '
+                           f'ขายสำเร็จครบ {NEW_SELLER_DEALS} ดีลแล้วใช้วงเงินตามระดับร้าน ({s["level_name"]} {s["level_limit"]:,} บาท/ดีล)')
         if role == 'seller':
-            raise ApiError(f'วงเงินของร้านระดับ {s["level_name"]} คือ {lim:,} บาท/ดีล — ขายสำเร็จเพิ่มขึ้นเพื่อเลื่อนระดับร้านและปลดล็อกวงเงิน')
+            raise ApiError(f'วงเงินของร้านระดับ {s["level_name"]} คือ {s["level_limit"]:,} บาท/ดีล — ขายสำเร็จเพิ่มขึ้นเพื่อเลื่อนระดับร้านและปลดล็อกวงเงิน')
         raise ApiError(f'ผู้ใช้ใหม่ซื้อได้สูงสุด {lim:,} บาท/ดีล — ทำดีลสำเร็จครบ 5 ดีลเพื่อปลดล็อกวงเงิน')
     if price > ID_REQUIRED_OVER and not user['id_verified']:
         raise ApiError('ดีลที่เกิน 3,000 บาท ต้องยืนยันตัวตนก่อน', 403)
@@ -700,6 +777,7 @@ def api_me(req, me, b):
     u['phone'] = me['phone']
     u['unread'] = q1('SELECT COUNT(*) n FROM notifications WHERE user_id=? AND read=0', (me['id'],))['n']
     u['chat_unread'] = chat_unread(me['id'])
+    u['penalty_owed'] = penalty_owed(me['id'])
     return {'user': u}
 
 
@@ -1007,6 +1085,11 @@ def api_accept(req, me, b, code):
 def api_pay(req, me, b, code):
     d = act(code, me); require_party(d, me, 'buyer')
     if d['status'] != 'accepted': raise ApiError('ดีลนี้ยังจ่ายไม่ได้ หรือจ่ายไปแล้ว')
+    method = b.get('method') or 'promptpay'
+    if method not in PAY_METHODS: raise ApiError('กรุณาเลือกวิธีจ่าย')
+    cf = card_surcharge(d['buyer_pay']) if method == 'card' else 0.0
+    ex('UPDATE deals SET pay_method=?, card_fee=? WHERE id=?', (method, cf, d['id']))
+    total = fmt_baht(money(d['buyer_pay'] + cf)) + (f' (รวมค่าธรรมเนียมบัตร {fmt_baht(cf)})' if cf else '')
     if is_stay(d):
         t = dnow(d)
         if t >= d['checkin_at'] + STAY_RELEASE: raise ApiError('เลยเวลาเช็คอินมานานแล้ว จ่ายดีลนี้ไม่ได้ กรุณาสร้างดีลใหม่')
@@ -1015,13 +1098,13 @@ def api_pay(req, me, b, code):
            (t, code4, max(d['checkin_at'], t) + STAY_RELEASE, d['id']))
         notify(d['seller_id'], code, f'ผู้เข้าพักจ่ายแล้ว {fmt_baht(d["buyer_pay"])} (จำลอง) เงินพักไว้จนเช็คอิน · '
                'วันเช็คอินบอกรหัส 4 หลักให้ผู้เข้าพักกรอกเมื่อเข้าห้องได้แล้ว', 'lock')
-        notify(d['buyer_id'], code, f'ชำระเงิน {fmt_baht(d["buyer_pay"])} สำเร็จ (จำลอง) เงินพักไว้ · เจ้าของที่พักได้เงินเมื่อคุณเช็คอินได้จริง', 'lock')
+        notify(d['buyer_id'], code, f'ชำระเงิน {total} สำเร็จ (จำลอง) เงินพักไว้ · เจ้าของที่พักได้เงินเมื่อคุณเช็คอินได้จริง', 'lock')
         return {'ok': True}
     meet = f'{random.randint(0, 9999):04d}' if d['delivery'] == 'meet' else None
     ex("UPDATE deals SET status='held', paid_at=?, meet_code=? WHERE id=?", (dnow(d), meet, d['id']))
     notify(d['seller_id'], code, f'ผู้ซื้อจ่ายแล้ว {fmt_baht(d["buyer_pay"])} (จำลอง) เงินพักไว้แล้ว · ' +
            ('นัดรับแล้วบอกรหัส 4 หลักให้ผู้ซื้อหลังเขาตรวจของ' if meet else 'ส่งของได้เลย'), 'lock')
-    notify(d['buyer_id'], code, f'ชำระเงิน {fmt_baht(d["buyer_pay"])} สำเร็จ (จำลอง) เงินถูกพักไว้แล้ว', 'lock')
+    notify(d['buyer_id'], code, f'ชำระเงิน {total} สำเร็จ (จำลอง) เงินถูกพักไว้แล้ว', 'lock')
     return {'ok': True}
 
 
@@ -1399,7 +1482,7 @@ def api_buy(req, me, b, pid):
     if dl not in jl(p['deliveries']): raise ApiError('กรุณาเลือกวิธีส่งมอบ')
     if p['price'] < MIN_PRICE: raise ApiError(f'ยอดดีลขั้นต่ำ {MIN_PRICE} บาท — สินค้านี้ราคาต่ำกว่าขั้นต่ำ จึงสั่งซื้อผ่านดีลชัวร์ไม่ได้')
     check_limits(me, 'buyer', p['price'])
-    check_limits(seller, 'seller', p['price'])
+    check_limits(seller, 'seller', p['price'], own=False)
     f = calc_fee(p['price'], p['fee_payer'])
     code = new_code(); t = now()
     due = today_str(t + p['ship_days'] * DAY)
@@ -1418,7 +1501,7 @@ def buy_stay(me, seller, p, b):
     if price > MAX_PRICE: raise ApiError('ยอดรวมสูงเกินไป')
     if price < MIN_PRICE: raise ApiError(f'ยอดดีลขั้นต่ำ {MIN_PRICE} บาท — ยอดจองนี้ต่ำกว่าขั้นต่ำ')
     check_limits(me, 'buyer', price)
-    check_limits(seller, 'seller', price)
+    check_limits(seller, 'seller', price, own=False)
     f = calc_fee(price, p['fee_payer'])
     code = new_code(); t = now()
     did = ex("""INSERT INTO deals(code,creator_id,creator_role,seller_id,buyer_id,product_id,source,title,description,price,photos,delivery,due_date,
@@ -1440,8 +1523,19 @@ def api_payouts(req, me, b):
     pens = [dict(r) for r in q("""SELECT r.amount, r.deducted, r.reason, r.created_at, d.code, d.title FROM records r LEFT JOIN deals d ON d.id=r.deal_id
                                   WHERE r.user_id=? AND r.kind='penalty' ORDER BY r.id DESC LIMIT 20""", (me['id'],))]
     batches = [dict(r) for r in q('SELECT * FROM payout_batches WHERE user_id=? ORDER BY id DESC LIMIT 20', (me['id'],))]
-    return {'items': [dict(r) for r in rows], 'pending': money(pend), 'penalty_owed': owed, 'next': payout_calc(pend, owed),
+    return {'items': [dict(r) for r in rows], 'pending': money(pend), 'penalty_owed': owed, 'next': payout_calc(pend, owed), 'blocked': owed > 0,
             'penalties': pens, 'batches': batches, 'rule': dict(fee=PAYOUT_FEE, free_from=PAYOUT_FREE_FROM)}
+
+
+@route('POST', '/api/penalties/pay')
+def api_pay_penalty(req, me, b):
+    """ชำระค่าปรับค้าง (จำลอง · ไม่มีเงินจริง) → ปลดล็อกการสร้างดีลและการโอนออก"""
+    settle_penalties(me['id'])
+    owed = penalty_owed(me['id'])
+    if owed <= 0: return {'ok': True, 'paid': 0}
+    ex("UPDATE records SET deducted=amount WHERE user_id=? AND kind='penalty' AND deducted < amount", (me['id'],))
+    notify(me['id'], None, f'ชำระค่าปรับ {fmt_baht(owed)} แล้ว (จำลอง) · สร้างดีลใหม่และรับเงินโอนออกได้ตามปกติ', 'check')
+    return {'ok': True, 'paid': owed}
 
 
 # ---------------- chat (แชทในดีล · ทักร้าน · ทีมงานคุยในข้อพิพาท) ----------------
@@ -1716,11 +1810,14 @@ def api_admin_resolve(req, me, b, code):
     elif dec == 'partial':
         try: amt = money(b.get('refund_amount'))
         except Exception: raise ApiError('กรุณากรอกจำนวนเงินที่คืนผู้ซื้อ')
-        if not 0 < amt < d['buyer_pay']: raise ApiError(f'จำนวนเงินคืนต้องมากกว่า 0 และน้อยกว่า {fmt_baht(d["buyer_pay"])}')
-        sp = partial_split(d['buyer_pay'], amt); pay = sp['pay']
+        mx = partial_max_refund(d)
+        if not 0 < amt < mx: raise ApiError(f'คืนบางส่วนได้มากกว่า 0 และน้อยกว่า {fmt_baht(mx)} (ราคาดีล − ค่าธรรมเนียมส่วนผู้ขาย) ถ้าจะคืนเกินนี้ให้เลือกคืนเต็ม')
+        sp = partial_split(d, amt); pay = sp['pay']
         ex("""UPDATE deals SET status='partial', completed_at=?, refunded_at=?, refund_amount=?, payout_amount=?, resolution='partial',
               resolution_note=?, fee_charged=? WHERE id=?""", (t, t, amt, pay, note, sp['fee'], d['id']))
-        if pay > 0: ex('INSERT INTO payouts(user_id,deal_id,amount,created_at) VALUES(?,?,?,?)', (d['seller_id'], d['id'], pay, now()))
+        if pay > 0:
+            ex('INSERT INTO payouts(user_id,deal_id,amount,created_at) VALUES(?,?,?,?)', (d['seller_id'], d['id'], pay, now()))
+            settle_penalties(d['seller_id'])
         notify(d['buyer_id'], code, f'ทีมงานตัดสินคืนเงินบางส่วน {fmt_baht(amt)} ให้คุณ (จำลอง)', 'wallet')
         notify(d['seller_id'], code, f'ทีมงานตัดสินแบ่งเงิน: คุณได้รับ {fmt_baht(pay)} รอโอนรอบถัดไป', 'wallet')
     else:
@@ -1746,7 +1843,11 @@ def api_admin_payouts(req, me, b):
     rows = q("SELECT user_id, SUM(amount) s, COUNT(*) n FROM payouts WHERE status='pending' GROUP BY user_id")
     t = now(); out = []
     for r in rows:
-        c = payout_calc(r['s'], penalty_owed(r['user_id']))
+        settle_penalties(r['user_id'])
+        owed = penalty_owed(r['user_id']); s = q1("SELECT COALESCE(SUM(amount),0) s FROM payouts WHERE user_id=? AND status='pending'", (r['user_id'],))['s']
+        if owed > 0:  # ยังมีค่าปรับค้าง → ระงับการโอนออกจนกว่าจะชำระครบ
+            out.append(dict(user_id=r['user_id'], blocked=True, owed=owed)); continue
+        c = payout_calc(s, 0)
         if c['rollover']:  # ยอดรวมไม่พอค่าโอน → ยกไปรวมรอบถัดไป
             notify(r['user_id'], None, f'ยอดรอโอน {fmt_baht(c["gross"])} ยังไม่พอค่าโอนออก {PAYOUT_FEE} บาท · รวมไปโอนรอบถัดไป', 'wallet')
             out.append(dict(user_id=r['user_id'], **c)); continue
@@ -1758,7 +1859,7 @@ def api_admin_payouts(req, me, b):
             if left <= 0: break
             take = money(min(left, pr['amount'] - pr['deducted'])); left = money(left - take)
             ex('UPDATE records SET deducted=? WHERE id=?', (money(pr['deducted'] + take), pr['id']))
-        parts = [f'ยอดรวม {fmt_baht(c["gross"])}', 'ค่าโอนออก ฟรี (ยอดรวม ≥ 1,000)' if not c['transfer_fee'] else f'ค่าโอนออก −{fmt_baht(c["transfer_fee"])}']
+        parts = [f'ยอดรวม {fmt_baht(c["gross"])}', 'ค่าโอนออก ฟรี (ยอดรวม ≥ 3,000 · ดีลชัวร์จ่ายค่าโอนให้)' if not c['transfer_fee'] else f'ค่าโอนออก −{fmt_baht(c["transfer_fee"])}']
         if c['penalty']: parts.append(f'ค่าปรับ −{fmt_baht(c["penalty"])}')
         notify(r['user_id'], None, f'โอนเงินรอบวันนี้ {fmt_baht(c["net"])} ({r["n"]} ดีล · {" · ".join(parts)}) เข้าบัญชีแล้ว (จำลอง)', 'wallet')
         out.append(dict(user_id=r['user_id'], batch_id=bid, **c))
