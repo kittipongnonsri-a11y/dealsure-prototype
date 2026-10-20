@@ -105,6 +105,34 @@ function resizeImage(file, max = 1280) {
   });
 }
 const readDataUrl = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+/* v10: คลิปวิดีโอ (ไม่บังคับ) · mp4 / webm / mov · สูงสุด 30 MB / ~60 วินาที */
+const VID_MAX_MB = 30, VID_MAX_SEC = 60;
+const isVid = u => /^data:video\//.test(u || '') || /\.(mp4|webm|mov)(\?|$)/i.test(u || '');
+const firstImg = arr => (arr || []).find(x => !isVid(x));
+const hasVid = arr => (arr || []).some(isVid);
+const mediaTag = (u, alt = 'รูป') => isVid(u) ? `<video src="${esc(u)}" controls playsinline preload="metadata"></video>` : `<a href="${esc(u)}" target="_blank"><img src="${esc(u)}" alt="${alt}"></a>`;
+const phTile = (u, i, onx) => `<div class="ph">${isVid(u) ? `<video src="${esc(u)}" muted playsinline preload="metadata"></video><span class="play">▶</span>` : `<img src="${u}" alt="รูป ${i + 1}">`}${onx ? `<button class="x" aria-label="ลบ" onclick="${onx}">✕</button>` : ''}</div>`;
+function videoDuration(file) {
+  return new Promise(res => {
+    const v = document.createElement('video'), url = URL.createObjectURL(file); let done = false;
+    const fin = d => { if (done) return; done = true; URL.revokeObjectURL(url); res(d); };
+    v.preload = 'metadata'; v.onloadedmetadata = () => fin(isFinite(v.duration) ? v.duration : 0); v.onerror = () => fin(0);
+    setTimeout(() => fin(0), 4000); v.src = url;
+  });
+}
+async function readVideo(f) {
+  if (!/^video\/(mp4|webm|quicktime)$/.test(f.type) && !/\.(mp4|webm|mov)$/i.test(f.name)) throw new Error('รองรับคลิป mp4 / webm / mov เท่านั้น');
+  if (f.size > VID_MAX_MB * 1024 * 1024) throw new Error(`คลิปใหญ่เกินไป (สูงสุด ${VID_MAX_MB} MB หรือประมาณ 1 นาที) ลองตัดให้สั้นลง`);
+  const sec = await videoDuration(f);
+  if (sec > VID_MAX_SEC + 2) throw new Error(`คลิปยาวเกินไป (สูงสุด ${VID_MAX_SEC} วินาที) ลองตัดให้สั้นลง`);
+  let u = await readDataUrl(f);
+  if (f.type === '' || f.type === 'application/octet-stream') u = u.replace(/^data:[^;]*;/, 'data:video/mp4;');
+  return u;
+}
+async function readMedia(f) { return f.type.startsWith('video/') || /\.(mp4|webm|mov)$/i.test(f.name) ? readVideo(f) : resizeImage(f); }
+function pickVideo(cb) { pickFiles('video/*', false, async fs => { if (!fs[0]) return; try { cb(await readVideo(fs[0]), fs[0].name); } catch (e) { toast(e.message); } }); }
+const UNBOX_TIP = '📹 แนะนำให้ถ่ายคลิปตอนแกะกล่องไว้ เผื่อของมีปัญหา จะใช้เป็นหลักฐานได้';
+const unboxTip = () => `<div class="vtip" id="unboxTip">${UNBOX_TIP}</div>`;
 
 /* ---------------- shared UI pieces ---------------- */
 const LEGAL_CONSENT = `<p class="small muted mt12 legal-consent" id="legalConsent">การเข้าใช้งานถือว่าคุณยอมรับ <a href="/terms">ข้อตกลงการใช้บริการ</a> และ <a href="/privacy">นโยบายความเป็นส่วนตัว</a> ของดีลชัวร์</p>`;
@@ -150,6 +178,7 @@ function stLabel(st, role, kind) {
   return `<span class="spill ${c}">${t}</span>`;
 }
 function thumb(photo, cls = 'thumb', icon = 'box') {
+  if (isVid(photo)) return `<div class="${cls} vthumb"><video src="${esc(photo)}" muted playsinline preload="metadata"></video><span class="play">▶</span></div>`;
   return photo ? `<div class="${cls} img" style="background-image:url('${esc(photo)}')"></div>` : `<div class="${cls}" style="background:#EAF6F2;display:grid;place-items:center;color:var(--tq-d)">${ic(icon, 26)}</div>`;
 }
 function fakeQr(size, cells, seedStr) {
@@ -435,7 +464,7 @@ function startDealFromProduct(pid) {
 }
 function pickTplCard(p, on) {
   const sy = (p.kind || 'goods') === 'stay';
-  const ph = (p.photos && p.photos[0]) ? `background-image:url('${esc(p.photos[0])}')` : '';
+  const im0 = firstImg(p.photos), ph = im0 ? `background-image:url('${esc(im0)}')` : '';
   return `<button type="button" class="tpl-card${on ? ' on' : ''}" data-pid="${p.id}" onclick="applyProductTemplate((S.myCatalog.${sy ? 'stays' : 'goods'}).find(x=>x.id===${p.id}))">
     <span class="tpl-img" style="${ph}">${ph ? '' : ic(sy ? 'home' : 'box', 20)}</span>
     <span class="tpl-t">${esc(p.title)}</span>
@@ -479,7 +508,7 @@ async function vCreate() {
       <textarea class="input" id="fDesc" maxlength="500" placeholder="เช่น สภาพ 90% พร้อมสายคล้อง">${esc(F.desc)}</textarea>
       <label class="lb">ราคาที่ตกลงกัน</label>
       <div class="price-wrap"><input class="input" id="price" inputmode="numeric" placeholder="0" value="${F.price ? Number(F.price).toLocaleString('en-US') : ''}"><span>บาท</span></div>
-      <label class="lb">รูปสินค้า <span class="opt">(ไม่บังคับ · สูงสุด 6 รูป)</span></label>
+      <label class="lb">รูป / คลิปสินค้า <span class="opt">(ไม่บังคับ · สูงสุด 6 ไฟล์ · คลิปไม่เกิน 30 MB / 1 นาที)</span></label>
       <div class="photos" id="fPhotos"></div>
     </div>
     <div class="card">
@@ -564,8 +593,8 @@ async function vCreate() {
   </div>`;
   const segSet = (id, val) => $$('#' + id + ' button').forEach(b => b.classList.toggle('on', b.dataset.v === val));
   const renderPhotos = () => {
-    $('#fPhotos').innerHTML = F.photos.map((p, i) => `<div class="ph"><img src="${p}" alt="รูป ${i + 1}"><button class="x" aria-label="ลบรูป" onclick="S.F.photos.splice(${i},1);vCreate()">✕</button></div>`).join('') +
-      (F.photos.length < 6 ? `<div class="ph add" onclick="addPhotos()">＋<br>เพิ่มรูป</div>` : '');
+    $('#fPhotos').innerHTML = F.photos.map((p, i) => phTile(p, i, `S.F.photos.splice(${i},1);vCreate()`)).join('') +
+      (F.photos.length < 6 ? `<div class="ph add" onclick="addPhotos()">＋<br>รูป / คลิป</div>` : '');
   };
   const upd = () => {
     segSet('kindSeg', F.kind); segSet('roleSeg', F.role); segSet('feeSeg', F.fee);
@@ -619,8 +648,8 @@ async function vCreate() {
   if (sav) sav.onchange = e => { F.save_as_product = e.target.checked; };
 }
 function addPhotos() {
-  pickFiles('image/*', true, async files => {
-    try { for (const f of files.slice(0, 6 - S.F.photos.length)) S.F.photos.push(await resizeImage(f)); } catch (e) { toast(e.message); }
+  pickFiles('image/*,video/*', true, async files => {
+    try { for (const f of files.slice(0, 6 - S.F.photos.length)) S.F.photos.push(await readMedia(f)); } catch (e) { toast(e.message); }
     const y = window.scrollY; vCreate(); window.scrollTo(0, y);
   });
 }
@@ -767,6 +796,9 @@ async function vDeal(code) {
   if (A('buyer_cancel')) ac += `<button class="btn ghost sm" id="buyerCancelBtn" onclick="cancelSheet()">ยกเลิกดีล (ก่อนผู้ขายส่งของ · ค่าดำเนินการ ${baht(d.cancel_preview ? d.cancel_preview.charge : d.buyer_cancel_charge)})</button><div style="height:12px"></div>`;
   if (A('seller_cancel')) ac += `<button class="btn danger sm" id="sellerCancelBtn" onclick="cancelSheet()">ยกเลิกดีล (คืนผู้ซื้อเต็ม · ค่าปรับ ${baht(d.fee)})</button><div style="height:12px"></div>`;
   if (['shipped', 'delivered'].includes(st) && role === 'buyer') ac += noteHtml('info', 'ผู้ขายส่งของแล้ว <b>ยกเลิกดีลไม่ได้</b> · ได้ของแล้วกดยืนยัน หรือถ้ามีปัญหาให้กด “แจ้งปัญหา” พร้อมคลิปแกะกล่อง/รูป ทีมงานตัดสินจากหลักฐานการส่ง วิดีโอแพ็กของ และแชท');
+  const goodsShip = !isStay(d) && d.delivery !== 'meet';
+  if (goodsShip && role === 'buyer' && ['shipped', 'delivered'].includes(st)) ac += unboxTip();
+  ac += clipsCard(d, role, st);
   if (A('confirm')) ac += `${st === 'delivered' ? `<div class="countdown" style="margin:0 0 12px">⏳ ตรวจสอบของภายใน <b>${d.delivery === 'messenger' ? '24 ชม.' : '3 วัน'}</b> — เหลืออีก <b data-until-short="${d.auto_release_at}">${durShort(d.auto_release_at - d.deal_now)}</b> หากไม่กดอะไร ระบบจะปล่อยเงินให้ผู้ขายอัตโนมัติ</div>` : ''}
       <div class="twobtn">${A('dispute') ? `<button class="btn danger" onclick="disputeSheet()">${ic('warn', 18)}แจ้งปัญหา</button>` : '<span></span>'}
       <button class="btn primary" onclick="confirmSheet()">${ic('check', 18)}ยืนยันรับของ</button></div><div style="height:12px"></div>`;
@@ -796,7 +828,7 @@ async function vDeal(code) {
       <div data-thread="${d.chat_thread_id}" data-mode="inline"></div></div>`;
   let sum = `<div class="card sum"><h3>สรุปดีล <span class="muted small" style="font-weight:400;margin-left:auto">#${esc(d.code)}</span></h3>
     <div class="prod">${thumb(d.photos[0])}<div class="grow"><b>${esc(d.title)}</b>${d.is_demo ? ' <span class="demo">ตัวอย่าง</span>' : ''}<div class="small muted">${esc(d.description || '')}</div></div></div>
-    ${d.photos.length > 1 ? `<div class="gallery" style="margin-bottom:6px">${d.photos.map(p => `<a href="${esc(p)}" target="_blank"><img src="${esc(p)}" alt="รูปสินค้า"></a>`).join('')}</div>` : ''}
+    ${d.photos.length > 1 || hasVid(d.photos) ? `<div class="gallery" style="margin-bottom:6px">${d.photos.map(p => mediaTag(p, 'รูปสินค้า')).join('')}</div>` : ''}
     <div class="r"><span>การส่งมอบ</span><b>${dlvLabel(d.delivery)}</b></div>
     <div class="r"><span>${d.delivery === 'meet' ? 'นัดรับภายใน' : 'กำหนดส่งภายใน'}</span><b>${dDate(d.due_date)}</b></div>
     <div class="r"><span>ราคาสินค้า</span><b>${baht(d.price)}</b></div>
@@ -846,7 +878,7 @@ function timeline(d) {
       x: d.status === 'delivered' ? `<div class="countdown">⏳ ตรวจสอบของภายใน <b>3 วัน</b> — เหลืออีก <b data-until-short="${d.auto_release_at}">${durShort(d.auto_release_at - d.deal_now)}</b> หากไม่กดอะไร ระบบจะยืนยันให้อัตโนมัติ</div>` : ''});
   } else if (d.delivery === 'messenger') {
     it.push({t: 'ผู้ขายส่งแมสเซนเจอร์แล้ว', m: d.shipped_at ? dTime(d.shipped_at) : 'ภายใน ' + dDate(d.due_date), done: !!d.shipped_at,
-      x: (d.proof_text ? `<div class="proof">${esc(d.proof_text)}</div>` : '') + (d.proof_photos && d.proof_photos.length ? `<div class="gallery">${d.proof_photos.map(p => `<a href="${esc(p)}" target="_blank"><img src="${esc(p)}" alt="หลักฐานการส่ง"></a>`).join('')}</div>` : '') +
+      x: (d.proof_text ? `<div class="proof">${esc(d.proof_text)}</div>` : '') + (d.proof_photos && d.proof_photos.length ? `<div class="gallery">${d.proof_photos.map(p => mediaTag(p, 'หลักฐานการส่ง')).join('')}</div>` : '') +
         (d.status === 'delivered' ? `<div class="countdown">⏳ ระบบปล่อยเงินอัตโนมัติใน <b data-until-short="${d.auto_release_at}">${durShort(d.auto_release_at - d.deal_now)}</b> (24 ชม. หลังส่ง) หากไม่มีการแจ้งปัญหา</div>` : '')});
   } else {
     it.push({t: 'นัดรับ – ผู้ซื้อกรอกรหัส 4 หลัก', m: d.completed_at && d.release_reason === 'meet_code' ? `${dTime(d.completed_at)} · รหัสถูกต้อง ปล่อยเงินทันที` : 'ภายใน ' + dDate(d.due_date) + ' · ผู้ซื้อตรวจของแล้วกรอกรหัสจากผู้ขาย', done: !!d.completed_at});
@@ -919,6 +951,36 @@ function paySheet() {
 function paySubmit(btn) {
   busy(btn, async () => { await api(`/deals/${S.deal.code}/pay`, {}); closeSheet(); toast('ชำระเงินสำเร็จ (จำลอง) เงินถูกพักไว้แล้ว'); await refreshDeal(); });
 }
+function clipsCard(d, role, st) {
+  if (isStay(d) || !role) return '';
+  const shipped = ['shipped', 'delivered', 'disputed', 'completed', 'partial', 'refunded'].includes(st) && d.shipped_at;
+  if (!d.pack_video && !d.unbox_video && !shipped) return '';
+  let h = '';
+  if (d.pack_video) h += `<div class="clip"><div class="small"><b>🎬 คลิปตอนแพ็คของ</b> (จากผู้ขาย)</div><video id="packVideo" src="${esc(d.pack_video)}" controls playsinline preload="metadata"></video></div>`;
+  if (d.unbox_video) h += `<div class="clip"><div class="small"><b>📦 คลิปตอนแกะกล่อง</b> (จากผู้ซื้อ)</div><video id="unboxVideo" src="${esc(d.unbox_video)}" controls playsinline preload="metadata"></video></div>`;
+  const can = d.delivery !== 'meet' && ['shipped', 'delivered', 'disputed', 'completed', 'partial'].includes(st);
+  if (!d.unbox_video && can && role === 'buyer') h += `<div class="clip-ask" id="unboxAsk">${d.unbox_requested_at ? `<div class="small" style="color:var(--tq-t);font-weight:600">ผู้ขายขอคลิปตอนแกะกล่อง</div>` : ''}
+      <label class="lb" style="margin-top:4px">คลิปตอนแกะกล่อง <span class="opt">(ไม่บังคับ)</span></label>
+      <p class="small muted" style="margin:0 0 8px">ไม่ต้องแนบก็ยืนยันรับของได้ · คลิปช่วยเป็นหลักฐานให้ทั้งสองฝ่าย (mp4 / webm / mov ไม่เกิน 30 MB / 1 นาที)</p>
+      <button class="btn ghost sm" id="unboxBtn" onclick="uploadUnbox(this)">${ic('video', 18)}แนบคลิปตอนแกะกล่อง</button></div>`;
+  if (!d.unbox_video && ['shipped', 'delivered', 'disputed'].includes(st) && role === 'seller' && d.delivery !== 'meet')
+    h += d.unbox_requested_at ? `<p class="small muted" id="unboxRequested">ส่งคำขอคลิปตอนแกะกล่องให้ผู้ซื้อแล้ว · รอผู้ซื้อแนบ (ไม่บังคับ)</p>`
+      : `<button class="btn ghost sm" id="reqUnboxBtn" onclick="requestUnbox(this)">${ic('video', 18)}ขอคลิปตอนแกะกล่อง</button>`;
+  if (!h) return '';
+  return `<div class="card" id="clipsCard"><h3>${ic('video', 18)}คลิปหลักฐาน</h3>${h}</div>`;
+}
+function requestUnbox(btn) { busy(btn, async () => { await api(`/deals/${S.deal.code}/request-unbox`, {}); toast('ส่งคำขอคลิปตอนแกะกล่องให้ผู้ซื้อแล้ว ✓'); await refreshDeal(); }); }
+function uploadUnbox(btn) {
+  pickVideo((u) => busy(btn, async () => { btn.textContent = 'กำลังอัปโหลด…'; await api(`/deals/${S.deal.code}/unbox-video`, {video: u}); toast('แนบคลิปตอนแกะกล่องแล้ว ✓'); await refreshDeal(); }));
+}
+function packFieldHtml() {
+  return `<label class="lb">คลิปตอนแพ็คของ <span class="opt">(ไม่บังคับ)</span></label>
+    <p class="small muted" style="margin:0 0 6px">แนบไว้เป็นหลักฐาน ช่วยให้ผู้ซื้อมั่นใจและใช้ตอนมีข้อพิพาทได้ · ไม่เกิน 30 MB / 1 นาที</p>
+    <div class="upload" id="packUp" onclick="pickPack()">${ic('video', 24)}<br><b>แตะเพื่อถ่าย / เลือกคลิป</b></div>`;
+}
+function pickPack() {
+  pickVideo((u, name) => { S.ship.pack = u; const up = $('#packUp'); if (up) { up.classList.add('ok'); up.innerHTML = `${ic('check', 22)}<br><b>แนบคลิปแล้ว</b><br><span class="small">${esc(name)} · แตะเพื่อเปลี่ยน</span>`; } });
+}
 function shipSheet() {
   const d = S.deal; S.ship = {carrier: 'Kerry Express', photos: []};
   if (d.delivery === 'parcel') {
@@ -927,6 +989,7 @@ function shipSheet() {
       <div class="chips" id="carChips">${['Kerry Express', 'Flash Express', 'ไปรษณีย์ไทย (EMS)', 'J&T Express', 'อื่น ๆ'].map((c, i) => `<button class="chip${i ? '' : ' on'}" style="flex:0 1 auto" data-v="${c}">${c}</button>`).join('')}</div>
       <label class="lb">เลขพัสดุ</label>
       <input class="input" id="trk" maxlength="40" placeholder="เช่น TH0000TEST01" style="text-transform:uppercase;font-family:Prompt;letter-spacing:.5px">
+      ${packFieldHtml()}
       <button class="btn primary mt12" id="shipBtn" onclick="shipSubmit(this)">${ic('truck', 20)}ยืนยันส่งของแล้ว</button>`);
     $$('#carChips .chip').forEach(c => c.onclick = () => { $$('#carChips .chip').forEach(x => x.classList.remove('on')); c.classList.add('on'); S.ship.carrier = c.dataset.v; });
   } else {
@@ -935,6 +998,7 @@ function shipSheet() {
       <textarea class="input" id="proofTxt" maxlength="300" placeholder="เช่น ลิงก์ติดตาม Grab, ชื่อไรเดอร์, ทะเบียนรถ"></textarea>
       <label class="lb">รูปตอนส่งของ <span class="opt">(ไม่บังคับ)</span></label>
       <div class="photos" id="proofPh"></div>
+      ${packFieldHtml()}
       <button class="btn primary mt12" id="shipBtn" onclick="shipSubmit(this)">${ic('bike', 20)}ยืนยันส่งของแล้ว</button>`);
     renderProofPh();
   }
@@ -947,6 +1011,7 @@ function shipSubmit(btn) {
   busy(btn, async () => {
     const d = S.deal;
     const body = d.delivery === 'parcel' ? {tracking: $('#trk').value, carrier: S.ship.carrier} : {proof_text: $('#proofTxt').value, photos: S.ship.photos};
+    if (S.ship.pack) { body.pack_video = S.ship.pack; btn.textContent = 'กำลังอัปโหลดคลิป…'; }
     await api(`/deals/${d.code}/ship`, body); closeSheet(); toast('บันทึกการส่งของแล้ว แจ้งผู้ซื้อแล้ว ✓'); await refreshDeal();
   });
 }
@@ -969,6 +1034,7 @@ function confirmSheet() {
   const d = S.deal; S.stars = 0;
   openSheet(`<h2>ยืนยันว่าได้รับของครบแล้ว?</h2>
     <p class="small muted">เมื่อยืนยัน เงิน ${baht(d.seller_get)} จะถูกรวมเข้ารอบโอนถัดไป (วันละครั้ง 18:00 น.) ให้ผู้ขาย และไม่สามารถยกเลิกได้</p>
+    ${d.delivery !== 'meet' && !isStay(d) ? unboxTip() : ''}
     <label class="lb mt12">ให้คะแนนร้าน <span class="opt">(ไม่บังคับ)</span></label>${starPicker('cfStars')}
     <textarea class="input mt8" id="cfText" maxlength="500" placeholder="เขียนรีวิวสั้น ๆ (ไม่บังคับ)"></textarea>${revPhotoField()}
     <button class="btn primary mt12" id="cfBtn" onclick="confirmSubmit(this)">${ic('check', 20)}ยืนยันรับของ</button>`);
@@ -1001,17 +1067,23 @@ function disputeSheet() {
     <label class="lb">ปัญหาที่พบ</label>
     <div class="chips" id="dpChips">${['ของไม่ตรงปก', 'ของเสียหาย', 'ไม่ได้รับของ', 'ได้ไม่ครบ', 'อื่น ๆ'].map((c, i) => `<button class="chip${i ? '' : ' on'}" data-v="${c}">${c}</button>`).join('')}</div>
     <label class="lb">แนบคลิปแกะกล่อง หรือรูปหลักฐาน <span style="color:var(--red)">*</span></label>
-    <div class="upload" id="dpUp" onclick="pickEvidence()">${ic('video', 26)}<br><b>แตะเพื่ออัปโหลดคลิปแกะกล่อง / รูป</b><br><span class="small">ถ่ายต่อเนื่องตั้งแต่ก่อนเปิดกล่อง เห็นใบปะหน้าชัดเจน (วิดีโอไม่เกิน 20 MB)</span></div>
+    <div class="upload" id="dpUp" onclick="pickEvidence()">${ic('video', 26)}<br><b>แตะเพื่ออัปโหลดคลิปแกะกล่อง / รูป</b><br><span class="small">ถ่ายต่อเนื่องตั้งแต่ก่อนเปิดกล่อง เห็นใบปะหน้าชัดเจน (วิดีโอไม่เกิน 30 MB / 1 นาที)</span></div>
+    ${S.deal.unbox_video ? '<p class="small" style="color:var(--tq-t)">✓ แนบคลิปตอนแกะกล่องไว้แล้ว ทีมงานจะใช้ประกอบการตัดสิน</p>' : `<label class="lb">คลิปตอนแกะกล่อง <span class="opt">(ไม่บังคับ)</span></label>
+    <p class="small muted" style="margin:0 0 6px">มีคลิปตอนแกะกล่องจะช่วยให้ทีมงานตัดสินเรื่องได้เร็วและชัดเจนขึ้น · ไม่เกิน 30 MB / 1 นาที</p>
+    <div class="upload" id="dpUnbox" onclick="pickDispUnbox()">${ic('video', 24)}<br><b>แตะเพื่อแนบคลิปตอนแกะกล่อง</b></div>`}
     <label class="lb">รายละเอียดเพิ่มเติม</label>
     <textarea class="input" id="dpText" maxlength="1000" placeholder="อธิบายปัญหาที่พบ…"></textarea>
     <button class="btn danger mt12" id="dpBtn" style="background:var(--red);color:#fff;border:none" onclick="disputeSubmit(this)">ส่งเรื่องแจ้งปัญหา</button>`);
   $$('#dpChips .chip').forEach(c => c.onclick = () => { $$('#dpChips .chip').forEach(x => x.classList.remove('on')); c.classList.add('on'); S.disp.reason = c.dataset.v; });
 }
+function pickDispUnbox() {
+  pickVideo((u, name) => { S.disp.unbox = u; const up = $('#dpUnbox'); if (up) { up.classList.add('ok'); up.innerHTML = `${ic('check', 22)}<br><b>แนบคลิปแล้ว</b><br><span class="small">${esc(name)}</span>`; } });
+}
 function pickEvidence() {
   pickFiles('video/*,image/*', true, async files => {
     for (const f of files.slice(0, 4 - S.disp.files.length)) {
       try {
-        if (f.type.startsWith('video/')) { if (f.size > 20 * 1024 * 1024) { toast('วิดีโอใหญ่เกิน 20 MB'); continue; } S.disp.files.push(await readDataUrl(f)); }
+        if (f.type.startsWith('video/')) { S.disp.files.push(await readVideo(f)); }
         else S.disp.files.push(await resizeImage(f));
         S.disp.names.push((f.type.startsWith('video/') ? '🎬 ' : '🖼 ') + f.name);
       } catch (e) { toast(e.message); }
@@ -1021,9 +1093,9 @@ function pickEvidence() {
 }
 function disputeSubmit(btn) {
   busy(btn, async () => {
-    if (!S.disp.files.length) throw new Error('กรุณาแนบคลิปแกะกล่องหรือรูปหลักฐานอย่างน้อย 1 ไฟล์');
+    if (!S.disp.files.length && !S.disp.unbox && !S.deal.unbox_video) throw new Error('กรุณาแนบคลิปแกะกล่องหรือรูปหลักฐานอย่างน้อย 1 ไฟล์');
     btn.textContent = 'กำลังอัปโหลด…';
-    try { await api(`/deals/${S.deal.code}/dispute`, {reason: S.disp.reason, detail: $('#dpText').value, files: S.disp.files}); }
+    try { await api(`/deals/${S.deal.code}/dispute`, {reason: S.disp.reason, detail: $('#dpText').value, files: S.disp.files, unbox_video: S.disp.unbox || null}); }
     finally { btn.textContent = 'ส่งเรื่องแจ้งปัญหา'; }
     closeSheet(); toast('ส่งเรื่องแล้ว ทีมงานจะติดต่อภายใน 24 ชม.'); await refreshDeal();
   });
@@ -1206,7 +1278,7 @@ function stayProblemSheet() {
     <label class="lb">ปัญหาที่พบ</label>
     <div class="chips" id="spChips">${STAY_REASONS.map((c, i) => `<button class="chip${i ? '' : ' on'}" data-v="${c}">${c}</button>`).join('')}</div>
     <label class="lb">รูป / วิดีโอ ณ ที่พัก <span style="color:var(--red)">*</span></label>
-    <div class="upload" id="dpUp" onclick="pickEvidence()">${ic('video', 26)}<br><b>แตะเพื่ออัปโหลดรูปหรือวิดีโอ</b><br><span class="small">ถ่ายให้เห็นหน้าบ้าน/ป้าย/ห้องจริง หรือจุดที่ปักหมุดไว้ (วิดีโอไม่เกิน 20 MB)</span></div>
+    <div class="upload" id="dpUp" onclick="pickEvidence()">${ic('video', 26)}<br><b>แตะเพื่ออัปโหลดรูปหรือวิดีโอ</b><br><span class="small">ถ่ายให้เห็นหน้าบ้าน/ป้าย/ห้องจริง หรือจุดที่ปักหมุดไว้ (วิดีโอไม่เกิน 30 MB / 1 นาที)</span></div>
     <label class="lb">ตอนนี้คุณอยู่ที่ไหน <span style="color:var(--red)">*</span></label>
     <textarea class="input" id="spLoc" maxlength="300" placeholder="เช่น ยืนอยู่ตรงหมุดใน Google Maps เป็นที่ดินเปล่า / หน้าประตูบ้านเลขที่ 99"></textarea>
     <button class="btn ghost sm mt8" type="button" onclick="useMyLocation(this)">📍 ใส่พิกัดตำแหน่งปัจจุบัน</button>
@@ -1465,8 +1537,9 @@ function shopProductCard(p, mine, compact) {
   const sy = p.kind === 'stay';
   const sold = !sy && p.sold_count > 0 ? `<div class="sold">ขายแล้ว ${fmt(p.sold_count)} ครั้ง</div>` : '';
   const imgH = compact ? 22 : 40;
+  const im = firstImg(p.photos), vid = (p.photos || []).find(isVid);
   return `<div class="pcard${compact ? ' sm' : ''}" data-pid="${p.id}">
-    <div class="img" style="${p.photos[0] ? `background-image:url('${esc(p.photos[0])}')` : ''}">${p.photos[0] ? '' : `<div style="display:grid;place-items:center;height:100%;color:var(--tq-d)">${ic(sy ? 'home' : 'box', imgH)}</div>`}
+    <div class="img" style="${im ? `background-image:url('${esc(im)}')` : ''}">${im ? '' : vid ? `<video src="${esc(vid)}" muted playsinline preload="metadata"></video>` : `<div style="display:grid;place-items:center;height:100%;color:var(--tq-d)">${ic(sy ? 'home' : 'box', imgH)}</div>`}${vid ? '<span class="play" title="มีคลิป">▶</span>' : ''}
       <span class="badge b-green">${sy ? '🏠 ที่พัก' : (p.deliveries || []).map(x => (DLV[x] || ['?'])[0]).join(' ')}</span></div>
     <div class="b"><div class="t">${esc(p.title)}</div>
       <div class="p">${baht(p.price)}${sy ? '<span class="small muted" style="font-weight:400"> /คืน</span>' : ''}</div>${sold}
@@ -1554,7 +1627,7 @@ function productSheet() {
     <label class="lb">ชื่อสินค้า</label><input class="input" id="pTitle" maxlength="120" placeholder="เช่น เสื้อวินเทจ ไซซ์ L">
     <label class="lb">ราคา (บาท)</label><div class="price-wrap"><input class="input" id="pPrice" inputmode="numeric" placeholder="0"><span>บาท</span></div>
     <label class="lb">รายละเอียด <span class="opt">(ไม่บังคับ)</span></label><textarea class="input" id="pDesc" maxlength="500"></textarea>
-    <label class="lb">รูปสินค้า</label><div class="photos" id="pPh"></div>
+    <label class="lb">รูป / คลิปสินค้า <span class="opt">(ไม่บังคับ · คลิปไม่เกิน 30 MB / 1 นาที)</span></label><div class="photos" id="pPh"></div>
     <label class="lb">วิธีส่งมอบที่รับได้ <span class="opt">(เลือกได้หลายแบบ)</span></label>
     <div class="chips" id="pDl">${Object.keys(DLV).map(k => `<button class="chip${k === 'parcel' ? ' on' : ''}" data-v="${k}">${ic(DLV[k][2])}${DLV[k][1]}</button>`).join('')}</div>
     <label class="lb">ใครจ่ายค่าธรรมเนียม?</label>
@@ -1567,9 +1640,9 @@ function productSheet() {
   $('#pPrice').oninput = e => { const raw = e.target.value.replace(/[^\d]/g, ''); e.target.value = raw ? Number(raw).toLocaleString('en-US') : ''; };
 }
 function renderProdPh() {
-  $('#pPh').innerHTML = S.prod.photos.map(p => `<div class="ph"><img src="${p}" alt=""></div>`).join('') + (S.prod.photos.length < 6 ? `<div class="ph add" onclick="addProdPh()">＋<br>เพิ่มรูป</div>` : '');
+  $('#pPh').innerHTML = S.prod.photos.map((p, i) => phTile(p, i, `S.prod.photos.splice(${i},1);renderProdPh()`)).join('') + (S.prod.photos.length < 6 ? `<div class="ph add" onclick="addProdPh()">＋<br>รูป / คลิป</div>` : '');
 }
-function addProdPh() { pickFiles('image/*', true, async fs => { try { for (const f of fs.slice(0, 6 - S.prod.photos.length)) S.prod.photos.push(await resizeImage(f)); } catch (e) { toast(e.message); } renderProdPh(); }); }
+function addProdPh() { pickFiles('image/*,video/*', true, async fs => { try { for (const f of fs.slice(0, 6 - S.prod.photos.length)) S.prod.photos.push(await readMedia(f)); } catch (e) { toast(e.message); } renderProdPh(); }); }
 function productSubmit(btn) {
   busy(btn, async () => {
     if (!S.prod.deliveries.length) throw new Error('เลือกวิธีส่งมอบอย่างน้อย 1 แบบ');

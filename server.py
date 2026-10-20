@@ -41,8 +41,9 @@ PARCEL_TRANSIT = 2 * DAY      # จำลอง: ขนส่งแจ้งข�
 PARCEL_RELEASE = 3 * DAY      # ปล่อยเงินอัตโนมัติ 3 วันหลังของถึง
 MESSENGER_RELEASE = 1 * DAY   # แมสเซนเจอร์ 24 ชม.
 DISPUTE_WINDOW = 3 * DAY
-MAX_BODY = 45 * 1024 * 1024
-MAX_FILE = 25 * 1024 * 1024
+MAX_BODY = 60 * 1024 * 1024
+MAX_FILE = 25 * 1024 * 1024     # รูป
+MAX_VIDEO = 30 * 1024 * 1024    # คลิป (~60 วินาที) · mp4 / webm / mov
 DELIVERIES = ('parcel', 'meet', 'messenger')
 FEE_PAYERS = ('buyer', 'seller', 'half')
 CARRIERS = ('Kerry Express', 'Flash Express', 'ไปรษณีย์ไทย (EMS)', 'J&T Express', 'อื่น ๆ')
@@ -129,7 +130,8 @@ def _migrate():
             ('products', 'host_contact', 'TEXT'),
             ('users', 'socials', "TEXT DEFAULT '{}'"), ('reviews', 'photos', "TEXT DEFAULT '[]'"),
             ('deals', 'cancel_charge', 'REAL'), ('deals', 'fee_charged', 'REAL'), ('deals', 'penalty', 'REAL'), ('deals', 'fault', 'TEXT'),
-            ('payouts', 'batch_id', 'INTEGER'))
+            ('payouts', 'batch_id', 'INTEGER'),
+            ('deals', 'pack_video', 'TEXT'), ('deals', 'unbox_video', 'TEXT'), ('deals', 'unbox_requested_at', 'REAL'))
     for table, col, typ in cols:
         if col not in [r[1] for r in db.execute(f'PRAGMA table_info({table})')]:
             db.execute(f'ALTER TABLE {table} ADD COLUMN {col} {typ}')
@@ -299,13 +301,22 @@ def save_files(items, allow=('image',), max_n=6):
         if not m: raise ApiError('ไฟล์ไม่ถูกต้อง')
         mime = m.group(1).lower()
         if mime not in MIME_EXT or mime.split('/')[0] not in allow:
-            raise ApiError('รองรับเฉพาะไฟล์รูป' + (' หรือวิดีโอ' if 'video' in allow else ''))
+            raise ApiError('รองรับเฉพาะไฟล์รูป' + (' หรือวิดีโอ (mp4 / webm / mov)' if 'video' in allow else ''))
         raw = base64.b64decode(m.group(2))
-        if len(raw) > MAX_FILE: raise ApiError('ไฟล์ใหญ่เกินไป (สูงสุด 25 MB)')
+        if mime.startswith('video/'):
+            if len(raw) > MAX_VIDEO: raise ApiError('คลิปใหญ่เกินไป (สูงสุด 30 MB หรือประมาณ 1 นาที) ลองตัดให้สั้นลงหรือลดความละเอียด')
+        elif len(raw) > MAX_FILE: raise ApiError('ไฟล์ใหญ่เกินไป (สูงสุด 25 MB)')
         name = secrets.token_hex(12) + MIME_EXT[mime]
         with open(os.path.join(UPLOADS, name), 'wb') as f: f.write(raw)
         out.append('/uploads/' + name)
     return out
+
+
+def save_video(item):
+    """คลิปเดียว (ไม่บังคับ) → path หรือ None"""
+    if not item: return None
+    f = save_files([item], allow=('video',), max_n=1)
+    return f[0] if f else None
 
 
 # ---------------- users & stats ----------------
@@ -627,7 +638,7 @@ def deal_view(d, me):
     for k in ('photos', 'proof_photos', 'dispute_files'): out[k] = jl(d[k])
     if role == 'seller' and (d['delivery'] == 'meet' or stay) and st == 'held': out['meet_code'] = d['meet_code']
     if not party:
-        for k in ('dispute_files', 'dispute_detail', 'tracking', 'proof_text', 'proof_photos', 'dispute_location'): out[k] = None
+        for k in ('dispute_files', 'dispute_detail', 'tracking', 'proof_text', 'proof_photos', 'dispute_location', 'pack_video', 'unbox_video'): out[k] = None
     if stay:
         cin = d['checkin_at']
         fcu = cin - (d['free_cancel_days'] or 0) * DAY
@@ -935,7 +946,7 @@ def api_create_deal(req, me, b):
         if kind == 'goods' and pk == 'stay': raise ApiError('รายการนี้เป็นที่พัก ไม่ใช่สินค้า')
         if kind == 'stay' and pk != 'stay': raise ApiError('รายการนี้ไม่ใช่ที่พัก')
     check_limits(me, role, price)
-    photos = save_files(b.get('photos'), max_n=6)
+    photos = save_files(b.get('photos'), allow=('image', 'video'), max_n=6)
     f = calc_fee(price, fee_payer)
     code = new_code()
     src = 'product' if product_id else 'link'
@@ -1021,22 +1032,51 @@ def api_ship(req, me, b, code):
     if d['status'] != 'held': raise ApiError('ยังส่งของไม่ได้ในขั้นตอนนี้')
     t = dnow(d)
     on_time = 1 if t <= due_ts(d['due_date']) else 0
+    pv = save_video(b.get('pack_video'))
+    if pv: ex('UPDATE deals SET pack_video=? WHERE id=?', (pv, d['id']))
     if d['delivery'] == 'parcel':
         trk = re.sub(r'\s', '', s_(b.get('tracking'), 40)).upper()
         if not re.fullmatch(r'[A-Z0-9-]{6,40}', trk): raise ApiError('กรุณากรอกเลขพัสดุให้ถูกต้อง (อย่างน้อย 6 ตัว)')
         carrier = b.get('carrier') if b.get('carrier') in CARRIERS else 'อื่น ๆ'
         ex("UPDATE deals SET status='shipped', shipped_at=?, tracking=?, carrier=?, on_time=? WHERE id=?", (t, trk, carrier, on_time, d['id']))
-        notify(d['buyer_id'], code, f'ผู้ขายส่งของแล้ว · {carrier} เลขพัสดุ {trk}', 'truck')
+        notify(d['buyer_id'], code, f'ผู้ขายส่งของแล้ว · {carrier} เลขพัสดุ {trk}' + (' · มีคลิปตอนแพ็คของ' if pv else '') + ' · 📹 แนะนำให้ถ่ายคลิปตอนแกะกล่องไว้ เผื่อของมีปัญหา จะใช้เป็นหลักฐานได้', 'truck')
     elif d['delivery'] == 'messenger':
         txt = s_(b.get('proof_text'), 300)
         photos = save_files(b.get('photos'), max_n=4)
         if not txt and not photos: raise ApiError('กรุณาแนบหลักฐาน: ลิงก์ติดตามไรเดอร์ หรือรูปตอนส่งของ')
         ex("""UPDATE deals SET status='delivered', shipped_at=?, delivered_at=?, auto_release_at=?, proof_text=?, proof_photos=?, on_time=?
               WHERE id=?""", (t, t, t + MESSENGER_RELEASE, txt, json.dumps(photos), on_time, d['id']))
-        notify(d['buyer_id'], code, 'ผู้ขายส่งแมสเซนเจอร์แล้ว ได้ของแล้วกดยืนยัน · ระบบปล่อยเงินอัตโนมัติใน 24 ชม.', 'bike')
+        notify(d['buyer_id'], code, 'ผู้ขายส่งแมสเซนเจอร์แล้ว ได้ของแล้วกดยืนยัน · ระบบปล่อยเงินอัตโนมัติใน 24 ชม. · 📹 แนะนำให้ถ่ายคลิปตอนแกะกล่องไว้ เผื่อของมีปัญหา จะใช้เป็นหลักฐานได้', 'bike')
     else:
         raise ApiError('ดีลนัดรับ ใช้รหัส 4 หลักแทนการกดส่งของ')
     return {'ok': True}
+
+
+UNBOX_OK = ('shipped', 'delivered', 'disputed', 'completed', 'partial')
+
+
+@route('POST', r'/api/deals/([A-Z0-9-]+)/request-unbox')
+def api_request_unbox(req, me, b, code):
+    d = act(code, me); require_party(d, me, 'seller')
+    if is_stay(d) or d['status'] not in ('shipped', 'delivered', 'disputed'): raise ApiError('ขอคลิปได้หลังส่งของแล้ว')
+    if d['unbox_video']: raise ApiError('ผู้ซื้อแนบคลิปตอนแกะกล่องแล้ว')
+    ex('UPDATE deals SET unbox_requested_at=? WHERE id=?', (now(), d['id']))
+    notify(d['buyer_id'], code, f'ผู้ขายขอคลิปตอนแกะกล่อง "{d["title"]}" (ไม่บังคับ) · ช่วยเป็นหลักฐานให้ทั้งสองฝ่าย', 'video')
+    th = deal_thread(d, 'deal')
+    ex('INSERT INTO messages(thread_id,sender_id,is_admin,text,photos,created_at) VALUES(?,?,0,?,?,?)',
+       (th['id'], me['id'], 'รบกวนถ่ายคลิปตอนแกะกล่องแนบในหน้าดีลด้วยนะครับ/คะ (ไม่บังคับ) ขอบคุณมาก 🙏', '[]', now()))
+    return {'ok': True}
+
+
+@route('POST', r'/api/deals/([A-Z0-9-]+)/unbox-video')
+def api_unbox_video(req, me, b, code):
+    d = act(code, me); require_party(d, me, 'buyer')
+    if is_stay(d) or d['status'] not in UNBOX_OK: raise ApiError('แนบคลิปได้หลังผู้ขายส่งของแล้ว')
+    uv = save_video(b.get('video'))
+    if not uv: raise ApiError('กรุณาเลือกคลิป')
+    ex('UPDATE deals SET unbox_video=? WHERE id=?', (uv, d['id']))
+    notify(d['seller_id'], code, f'ผู้ซื้อแนบคลิปตอนแกะกล่อง "{d["title"]}" แล้ว', 'video')
+    return {'ok': True, 'unbox_video': uv}
 
 
 @route('POST', r'/api/deals/([A-Z0-9-]+)/simulate-delivered')
@@ -1088,7 +1128,9 @@ def api_dispute(req, me, b, code):
     reason = b.get('reason')
     if reason not in DISPUTE_REASONS: raise ApiError('กรุณาเลือกปัญหาที่พบ')
     files = save_files(b.get('files'), allow=('image', 'video'), max_n=4)
-    if not files: raise ApiError('กรุณาแนบคลิปแกะกล่องหรือรูปหลักฐานอย่างน้อย 1 ไฟล์')
+    uv = save_video(b.get('unbox_video'))
+    if uv: ex('UPDATE deals SET unbox_video=? WHERE id=?', (uv, d['id']))
+    if not files and not uv and not d['unbox_video']: raise ApiError('กรุณาแนบคลิปแกะกล่องหรือรูปหลักฐานอย่างน้อย 1 ไฟล์')
     ex("""UPDATE deals SET status='disputed', disputed_at=?, dispute_reason=?, dispute_detail=?, dispute_files=? WHERE id=?""",
        (t, reason, s_(b.get('detail'), 1000), json.dumps(files), d['id']))
     notify(d['seller_id'], code, f'ผู้ซื้อแจ้งปัญหา: {reason} · เงินถูกพักไว้ระหว่างทีมงานตรวจสอบ', 'warn')
@@ -1282,7 +1324,7 @@ def api_add_product(req, me, b):
     fp = b.get('fee_payer') if b.get('fee_payer') in FEE_PAYERS else 'half'
     try: days = max(1, min(int(b.get('ship_days') or 3), 14))
     except Exception: days = 3
-    photos = save_files(b.get('photos'), max_n=6)
+    photos = save_files(b.get('photos'), allow=('image', 'video'), max_n=6)
     pid = ex('INSERT INTO products(user_id,title,description,price,photos,deliveries,fee_payer,ship_days,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
              (me['id'], title, s_(b.get('description'), 500), price, json.dumps(photos), json.dumps(dl), fp, days, now()))
     return {'id': pid}
@@ -1300,7 +1342,7 @@ def add_stay_product(me, b):
     try: mg = max(1, min(int(b.get('max_guests') or 2), 30))
     except Exception: mg = 2
     fp = b.get('fee_payer') if b.get('fee_payer') in FEE_PAYERS else 'half'
-    photos = save_files(b.get('photos'), max_n=6)
+    photos = save_files(b.get('photos'), allow=('image', 'video'), max_n=6)
     pid = ex("""INSERT INTO products(user_id,title,description,price,photos,deliveries,fee_payer,ship_days,created_at,kind,address,map_url,
                   checkin_time,max_guests,free_cancel_days,host_contact) VALUES(?,?,?,?,?,'["stay"]',?,0,?,'stay',?,?,?,?,?,?)""",
              (me['id'], st['title'], s_(b.get('description'), 500), price, json.dumps(photos), fp, now(), st['address'], st['map_url'],

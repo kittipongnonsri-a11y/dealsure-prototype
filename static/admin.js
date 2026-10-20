@@ -91,6 +91,8 @@ async function load() {
         <div class="small">ผู้ซื้อจ่าย <b>${baht(d.buyer_pay)}</b> · ผู้ขายจะได้ (ถ้าปล่อยเงิน) <b>${baht(d.seller_get)}</b> · เลขพัสดุ ${esc(d.tracking || '-')}</div>`}
         ${d.dispute_detail ? `<div class="proof">${esc(d.dispute_detail)}</div>` : ''}
         <div class="gallery">${files(d.dispute_files)}</div>
+        ${d.pack_video ? `<div class="small mt8"><b>🎬 คลิปตอนแพ็คของ (ผู้ขาย)</b></div><div class="gallery">${files([d.pack_video])}</div>` : ''}
+        ${d.unbox_video && !(d.dispute_files || []).includes(d.unbox_video) ? `<div class="small mt8"><b>📦 คลิปตอนแกะกล่อง (ผู้ซื้อ)</b></div><div class="gallery">${files([d.unbox_video])}</div>` : ''}
         <div class="admin-thread" id="athread-${d.thread.id}">
           <h4>${ic('chat', 18)}ข้อความถึง${d.kind === 'stay' ? 'ผู้เข้าพักและเจ้าของที่พัก' : 'ผู้ซื้อและผู้ขาย'} ${d.thread.unread ? `<span class="unread-pill" id="aunread-${d.thread.id}">ใหม่ ${d.thread.unread}</span>` : ''}<span class="small muted" style="font-weight:400;margin-left:auto">ทั้งสองฝ่ายเห็นข้อความนี้ในหน้าดีล + ได้แจ้งเตือน</span></h4>
           <div class="msgs" id="amsgs-${d.thread.id}">${threadMsgs(d.thread, d.thread.messages)}</div>
