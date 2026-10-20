@@ -131,7 +131,7 @@ def _migrate():
             ('users', 'socials', "TEXT DEFAULT '{}'"), ('reviews', 'photos', "TEXT DEFAULT '[]'"),
             ('deals', 'cancel_charge', 'REAL'), ('deals', 'fee_charged', 'REAL'), ('deals', 'penalty', 'REAL'), ('deals', 'fault', 'TEXT'),
             ('payouts', 'batch_id', 'INTEGER'),
-            ('deals', 'pack_video', 'TEXT'), ('deals', 'unbox_video', 'TEXT'), ('deals', 'unbox_requested_at', 'REAL'))
+            ('deals', 'pack_video', 'TEXT'), ('deals', 'unbox_video', 'TEXT'), ('deals', 'unbox_requested_at', 'REAL'), ('deals', 'pack_requested_at', 'REAL'))
     for table, col, typ in cols:
         if col not in [r[1] for r in db.execute(f'PRAGMA table_info({table})')]:
             db.execute(f'ALTER TABLE {table} ADD COLUMN {col} {typ}')
@@ -1033,6 +1033,7 @@ def api_ship(req, me, b, code):
     t = dnow(d)
     on_time = 1 if t <= due_ts(d['due_date']) else 0
     pv = save_video(b.get('pack_video'))
+    if d['pack_requested_at'] and not pv and not d['pack_video']: raise ApiError('ผู้ซื้อขอคลิปตอนแพ็คของ ต้องแนบคลิปก่อนแจ้งส่งของ')
     if pv: ex('UPDATE deals SET pack_video=? WHERE id=?', (pv, d['id']))
     if d['delivery'] == 'parcel':
         trk = re.sub(r'\s', '', s_(b.get('tracking'), 40)).upper()
@@ -1077,6 +1078,35 @@ def api_unbox_video(req, me, b, code):
     ex('UPDATE deals SET unbox_video=? WHERE id=?', (uv, d['id']))
     notify(d['seller_id'], code, f'ผู้ซื้อแนบคลิปตอนแกะกล่อง "{d["title"]}" แล้ว', 'video')
     return {'ok': True, 'unbox_video': uv}
+
+
+PACK_OK = ('held', 'shipped', 'delivered', 'disputed')
+
+
+@route('POST', r'/api/deals/([A-Z0-9-]+)/request-pack')
+def api_request_pack(req, me, b, code):
+    d = act(code, me); require_party(d, me, 'buyer')
+    if is_stay(d) or d['delivery'] == 'meet': raise ApiError('ดีลนี้ไม่มีขั้นตอนแพ็คของส่ง')
+    if d['status'] != 'held': raise ApiError('ขอคลิปตอนแพ็คของได้ก่อนผู้ขายแจ้งส่งของเท่านั้น')
+    if d['pack_video']: raise ApiError('ผู้ขายแนบคลิปตอนแพ็คของแล้ว')
+    if d['pack_requested_at']: return {'ok': True, 'already': True}
+    ex('UPDATE deals SET pack_requested_at=? WHERE id=?', (now(), d['id']))
+    notify(d['seller_id'], code, f'ผู้ซื้อขอคลิปตอนแพ็คของ "{d["title"]}" · ต้องแนบคลิปก่อนแจ้งส่งของ', 'video')
+    th = deal_thread(d, 'deal')
+    ex('INSERT INTO messages(thread_id,sender_id,is_admin,text,photos,created_at) VALUES(?,?,0,?,?,?)',
+       (th['id'], me['id'], 'รบกวนถ่ายคลิปตอนแพ็คของแนบตอนแจ้งส่งของด้วยนะครับ/คะ ขอบคุณมาก 🙏', '[]', now()))
+    return {'ok': True}
+
+
+@route('POST', r'/api/deals/([A-Z0-9-]+)/pack-video')
+def api_pack_video(req, me, b, code):
+    d = act(code, me); require_party(d, me, 'seller')
+    if is_stay(d) or d['delivery'] == 'meet' or d['status'] not in PACK_OK: raise ApiError('แนบคลิปตอนแพ็คของไม่ได้ในขั้นตอนนี้')
+    pv = save_video(b.get('video'))
+    if not pv: raise ApiError('กรุณาเลือกคลิป')
+    ex('UPDATE deals SET pack_video=? WHERE id=?', (pv, d['id']))
+    notify(d['buyer_id'], code, f'ผู้ขายแนบคลิปตอนแพ็คของ "{d["title"]}" แล้ว', 'video')
+    return {'ok': True, 'pack_video': pv}
 
 
 @route('POST', r'/api/deals/([A-Z0-9-]+)/simulate-delivered')

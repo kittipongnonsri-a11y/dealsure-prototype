@@ -954,8 +954,17 @@ function paySubmit(btn) {
 function clipsCard(d, role, st) {
   if (isStay(d) || !role) return '';
   const shipped = ['shipped', 'delivered', 'disputed', 'completed', 'partial', 'refunded'].includes(st) && d.shipped_at;
-  if (!d.pack_video && !d.unbox_video && !shipped) return '';
+  const packable = d.delivery !== 'meet' && ['held', 'shipped', 'delivered', 'disputed'].includes(st);
+  if (!d.pack_video && !d.unbox_video && !shipped && !packable) return '';
   let h = '';
+  if (!d.pack_video && st === 'held' && d.delivery !== 'meet' && role === 'buyer')
+    h += d.pack_requested_at ? `<p class="small muted" id="packRequested">ส่งคำขอแล้ว · ผู้ขายต้องแนบคลิปก่อนส่งของ</p>`
+      : `<button class="btn ghost sm" id="reqPackBtn" onclick="requestPack(this)">${ic('video', 18)}ขอคลิปตอนแพ็คของ</button>`;
+  if (!d.pack_video && packable && role === 'seller' && st !== 'held') h += `<div class="clip-ask" id="packAsk">
+      <p class="small muted" style="margin:4px 0 8px">คลิปตอนแพ็คของ (ไม่บังคับ) · แนบเพิ่มทีหลังได้ ช่วยให้ผู้ซื้อมั่นใจและใช้ตอนมีข้อพิพาทได้ (ไม่เกิน 30 MB / 1 นาที)</p>
+      <button class="btn ghost sm" id="packLaterBtn" onclick="uploadPackLater(this)">${ic('video', 18)}แนบคลิปตอนแพ็คของ</button></div>`;
+  if (!d.pack_video && st === 'held' && role === 'seller' && d.pack_requested_at && d.delivery !== 'meet')
+    h += `<div class="small" id="packAsk" style="color:var(--tq-t);font-weight:600">ผู้ซื้อขอคลิปตอนแพ็คของ ต้องแนบคลิปก่อนแจ้งส่งของ</div>`;
   if (d.pack_video) h += `<div class="clip"><div class="small"><b>🎬 คลิปตอนแพ็คของ</b> (จากผู้ขาย)</div><video id="packVideo" src="${esc(d.pack_video)}" controls playsinline preload="metadata"></video></div>`;
   if (d.unbox_video) h += `<div class="clip"><div class="small"><b>📦 คลิปตอนแกะกล่อง</b> (จากผู้ซื้อ)</div><video id="unboxVideo" src="${esc(d.unbox_video)}" controls playsinline preload="metadata"></video></div>`;
   const can = d.delivery !== 'meet' && ['shipped', 'delivered', 'disputed', 'completed', 'partial'].includes(st);
@@ -969,17 +978,30 @@ function clipsCard(d, role, st) {
   if (!h) return '';
   return `<div class="card" id="clipsCard"><h3>${ic('video', 18)}คลิปหลักฐาน</h3>${h}</div>`;
 }
+function requestPack(btn) { busy(btn, async () => { await api(`/deals/${S.deal.code}/request-pack`, {}); toast('ส่งคำขอแล้ว · ผู้ขายต้องแนบคลิปก่อนส่งของ'); await refreshDeal(); }); }
+function uploadPackLater(btn) {
+  pickVideo((u) => busy(btn, async () => { btn.textContent = 'กำลังอัปโหลด…'; await api(`/deals/${S.deal.code}/pack-video`, {video: u}); toast('แนบคลิปตอนแพ็คของแล้ว ✓'); await refreshDeal(); }));
+}
 function requestUnbox(btn) { busy(btn, async () => { await api(`/deals/${S.deal.code}/request-unbox`, {}); toast('ส่งคำขอคลิปตอนแกะกล่องให้ผู้ซื้อแล้ว ✓'); await refreshDeal(); }); }
 function uploadUnbox(btn) {
   pickVideo((u) => busy(btn, async () => { btn.textContent = 'กำลังอัปโหลด…'; await api(`/deals/${S.deal.code}/unbox-video`, {video: u}); toast('แนบคลิปตอนแกะกล่องแล้ว ✓'); await refreshDeal(); }));
 }
 function packFieldHtml() {
-  return `<label class="lb">คลิปตอนแพ็คของ <span class="opt">(ไม่บังคับ)</span></label>
+  const req = S.deal && S.deal.pack_requested_at && !S.deal.pack_video;
+  return `${req ? '<div class="vtip" id="packReqTip">📹 ผู้ซื้อขอคลิปตอนแพ็คของ ต้องแนบคลิปก่อนแจ้งส่งของ</div>' : ''}<label class="lb">คลิปตอนแพ็คของ <span class="opt">${req ? '(ผู้ซื้อขอ · ต้องแนบ)' : '(ไม่บังคับ)'}</span></label>
     <p class="small muted" style="margin:0 0 6px">แนบไว้เป็นหลักฐาน ช่วยให้ผู้ซื้อมั่นใจและใช้ตอนมีข้อพิพาทได้ · ไม่เกิน 30 MB / 1 นาที</p>
     <div class="upload" id="packUp" onclick="pickPack()">${ic('video', 24)}<br><b>แตะเพื่อถ่าย / เลือกคลิป</b></div>`;
 }
+function packGate() {
+  const b = $('#shipBtn'); if (!b) return;
+  const need = S.deal.pack_requested_at && !S.deal.pack_video && !S.ship.pack;
+  b.disabled = !!need;
+  let m = $('#packNeedMsg');
+  if (need && !m) { b.insertAdjacentHTML('beforebegin', '<p class="small" id="packNeedMsg" style="color:#B45309;font-weight:600;margin:10px 0 0">ผู้ซื้อขอคลิปตอนแพ็คของ ต้องแนบคลิปก่อนแจ้งส่งของ</p>'); }
+  else if (!need && m) m.remove();
+}
 function pickPack() {
-  pickVideo((u, name) => { S.ship.pack = u; const up = $('#packUp'); if (up) { up.classList.add('ok'); up.innerHTML = `${ic('check', 22)}<br><b>แนบคลิปแล้ว</b><br><span class="small">${esc(name)} · แตะเพื่อเปลี่ยน</span>`; } });
+  pickVideo((u, name) => { S.ship.pack = u; const up = $('#packUp'); if (up) { up.classList.add('ok'); up.innerHTML = `${ic('check', 22)}<br><b>แนบคลิปแล้ว</b><br><span class="small">${esc(name)} · แตะเพื่อเปลี่ยน</span>`; } packGate(); });
 }
 function shipSheet() {
   const d = S.deal; S.ship = {carrier: 'Kerry Express', photos: []};
@@ -990,7 +1012,7 @@ function shipSheet() {
       <label class="lb">เลขพัสดุ</label>
       <input class="input" id="trk" maxlength="40" placeholder="เช่น TH0000TEST01" style="text-transform:uppercase;font-family:Prompt;letter-spacing:.5px">
       ${packFieldHtml()}
-      <button class="btn primary mt12" id="shipBtn" onclick="shipSubmit(this)">${ic('truck', 20)}ยืนยันส่งของแล้ว</button>`);
+      <button class="btn primary mt12" id="shipBtn" onclick="shipSubmit(this)">${ic('truck', 20)}ยืนยันส่งของแล้ว</button>`); packGate();
     $$('#carChips .chip').forEach(c => c.onclick = () => { $$('#carChips .chip').forEach(x => x.classList.remove('on')); c.classList.add('on'); S.ship.carrier = c.dataset.v; });
   } else {
     openSheet(`<h2>แนบหลักฐานการส่งแมสเซนเจอร์</h2><p class="small muted">ระบบจะปล่อยเงินอัตโนมัติ 24 ชม. หลังส่ง ถ้าผู้ซื้อไม่แจ้งปัญหา</p>
@@ -999,7 +1021,7 @@ function shipSheet() {
       <label class="lb">รูปตอนส่งของ <span class="opt">(ไม่บังคับ)</span></label>
       <div class="photos" id="proofPh"></div>
       ${packFieldHtml()}
-      <button class="btn primary mt12" id="shipBtn" onclick="shipSubmit(this)">${ic('bike', 20)}ยืนยันส่งของแล้ว</button>`);
+      <button class="btn primary mt12" id="shipBtn" onclick="shipSubmit(this)">${ic('bike', 20)}ยืนยันส่งของแล้ว</button>`); packGate();
     renderProofPh();
   }
 }
