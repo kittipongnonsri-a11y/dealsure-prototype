@@ -25,7 +25,7 @@ TZ = timezone(timedelta(hours=7))  # Asia/Bangkok
 HOUR, DAY = 3600, 86400
 
 # ---- business rules ----
-FEE_RATE, FEE_MIN = 0.02, 20
+FEE_RATE, FEE_MIN = 0.03, 20
 MIN_PRICE, MAX_PRICE = 100, 1_000_000   # ยอดดีลขั้นต่ำ 100 บาท (ยืนยันโดยเจ้าของ ต.ค. 2569)
 PAYOUT_FEE, PAYOUT_FREE_FROM = 30, 1000  # ค่าโอนออก 30 บาท/วัน (ผู้ขายจ่าย หักจากยอดรวมโอนรายวัน) ฟรีเมื่อยอดรวม ≥ 1,000 บาท
 CANCEL_RATE, CANCEL_MIN = 0.02, 10       # ผู้ซื้อยกเลิกเอง: ค่าดำเนินการ 2% ของยอดที่จ่าย ขั้นต่ำ 10 บาท
@@ -173,7 +173,7 @@ def cancel_charge(paid):
 
 
 def partial_split(buyer_pay, refund):
-    """คืนบางส่วน: ค่าธรรมเนียมคิดจากยอดที่ผู้ขายได้จริงเท่านั้น (2% ขั้นต่ำ 20 บาท)"""
+    """คืนบางส่วน: ค่าธรรมเนียมคิดจากยอดที่ผู้ขายได้จริงเท่านั้น (3% ขั้นต่ำ 20 บาท)"""
     kept = money(buyer_pay - refund)
     fee = money(min(kept, max(FEE_MIN, kept * FEE_RATE)))
     return dict(kept=kept, fee=fee, pay=money(kept - fee))

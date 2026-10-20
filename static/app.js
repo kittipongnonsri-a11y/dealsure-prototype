@@ -194,7 +194,7 @@ function fakeQr(size, cells, seedStr) {
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="QR จำลอง">${s}</svg>`;
 }
 function calcFee(price, payer) {
-  const fee = price > 0 ? Math.max(20, Math.round(price * 2) / 100) : 0;
+  const fee = price > 0 ? Math.max(20, Math.round(price * 3) / 100) : 0;
   let b = 0, s = 0; if (payer === 'buyer') b = fee; else if (payer === 'seller') s = fee; else { b = Math.round(fee / 2 * 100) / 100; s = Math.round((fee - b) * 100) / 100; }
   return {fee, b, s, buyer: price + b, seller: price - s};
 }
@@ -575,7 +575,7 @@ async function vCreate() {
       <div class="seg" id="feeSeg"><button data-v="buyer">${R.buyer}</button><button data-v="seller">${R.seller}</button><button data-v="half">คนละครึ่ง</button></div>
       <div class="card fee mt12" style="margin-bottom:0;box-shadow:none">
         <div class="r"><span class="muted">${stay ? 'ราคาที่พัก' : 'ราคาสินค้า'}</span><b id="fPrice"></b></div>
-        <div class="r"><span class="muted">ค่าธรรมเนียม 2% <span class="small">(ขั้นต่ำ 20 ฿)</span></span><b id="fFee"></b></div>
+        <div class="r"><span class="muted">ค่าธรรมเนียม 3% <span class="small">(ขั้นต่ำ 20 ฿)</span></span><b id="fFee"></b></div>
         <div class="r small"><span class="muted">แบ่งจ่าย</span><span id="fSplit"></span></div>
         <div class="r tot"><span>${R.buyer}จ่าย</span><b id="fBuyer"></b></div>
         <div class="r"><span class="muted">${R.seller}ได้รับ</span><b id="fSeller" style="color:var(--navy)"></b></div>
@@ -832,7 +832,7 @@ async function vDeal(code) {
     <div class="r"><span>การส่งมอบ</span><b>${dlvLabel(d.delivery)}</b></div>
     <div class="r"><span>${d.delivery === 'meet' ? 'นัดรับภายใน' : 'กำหนดส่งภายใน'}</span><b>${dDate(d.due_date)}</b></div>
     <div class="r"><span>ราคาสินค้า</span><b>${baht(d.price)}</b></div>
-    <div class="r"><span>ค่าธรรมเนียม 2% (${FEEP[d.fee_payer]})</span><b>${baht(d.fee)}</b></div>
+    <div class="r"><span>ค่าธรรมเนียม 3% (${FEEP[d.fee_payer]})</span><b>${baht(d.fee)}</b></div>
     <div class="r"><span>ผู้ขายได้รับ</span><b>${baht(d.seller_get)}</b></div>
     <div class="r small"><span>ค่าโอนออก (ผู้ขาย)</span><span>${PAYOUT_RULE}</span></div>
     ${['open', 'accepted', 'held'].includes(st) ? `<div class="mt8"><b class="small">ถ้ายกเลิกหลังจ่ายเงิน</b>${chargeRows(d.price, d.fee_payer, false, {fee: d.fee, buyer: d.buyer_pay}).replace(/<div class="r small payout-rule">[\s\S]*?<\/div><\/div>$/, '</div>')}</div>` : ''}
@@ -1236,7 +1236,7 @@ function stayParts(d, c) {
     <div class="r"><span>ผู้ติดต่อของที่พัก</span><b>${esc(d.host_contact || '-')}</b></div>
     <div class="r"><span>ยกเลิกฟรี</span><b>${fcd ? `ก่อนเช็คอิน ${fcd} วัน<br><span class="small muted" style="font-weight:400">(ถึง ${dFull(d.free_cancel_until)})</span>` : 'จนถึงเวลาเช็คอิน'}</b></div>
     <div class="r"><span>ราคาที่พัก</span><b>${baht(d.price)}</b></div>
-    <div class="r"><span>ค่าธรรมเนียม 2% (${{buyer: 'ผู้เข้าพักจ่าย', seller: 'เจ้าของจ่าย', half: 'คนละครึ่ง'}[d.fee_payer]})</span><b>${baht(d.fee)}</b></div>
+    <div class="r"><span>ค่าธรรมเนียม 3% (${{buyer: 'ผู้เข้าพักจ่าย', seller: 'เจ้าของจ่าย', half: 'คนละครึ่ง'}[d.fee_payer]})</span><b>${baht(d.fee)}</b></div>
     <div class="r"><span>เจ้าของที่พักได้รับ</span><b>${baht(d.seller_get)}</b></div>
     <div class="r small"><span>ค่าโอนออก (เจ้าของ)</span><span>${PAYOUT_RULE}</span></div>
     ${['open', 'accepted', 'held'].includes(st) ? `<div class="mt8"><b class="small">ถ้ายกเลิกหลังจ่ายเงิน</b>${chargeRows(d.price, d.fee_payer, true, {fee: d.fee, buyer: d.buyer_pay}).replace(/<div class="r small payout-rule">[\s\S]*?<\/div><\/div>$/, '</div>')}</div>` : ''}
@@ -1358,7 +1358,7 @@ function moneyOutcome(d, role) {
   /* หลังยกเลิก/คืนเงิน: แสดงค่าดำเนินการ (ผู้ซื้อ) หรือค่าปรับ (ผู้ขาย) */
   if (role === 'seller' && d.penalty > 0) return noteHtml('err', `<b>ค่าปรับ ${baht(d.penalty)}</b> (เท่าค่าธรรมเนียมดีลนี้) เพราะ${isStay(d) ? 'เจ้าของที่พัก' : 'ผู้ขาย'}เป็นฝ่ายยกเลิก/ผิดเงื่อนไข · หักจากยอดโอนรอบถัดไป <a class="link" href="#/me">ดูเงินขายของฉัน →</a>`);
   if (role === 'buyer' && d.status === 'refunded') return noteHtml('ok', d.cancel_charge > 0 ? `คืนเงิน ${baht(d.refund_amount)} · หักค่าดำเนินการ ${baht(d.cancel_charge)} (ยกเลิกเอง)` : `คืนเงินเต็มจำนวน ${baht(d.refund_amount)} รวมค่าธรรมเนียม`);
-  if (d.status === 'partial' && d.fee_charged != null) return noteHtml('info', `คืนบางส่วน: ค่าธรรมเนียมคิดจากยอดที่${isStay(d) ? 'เจ้าของ' : 'ผู้ขาย'}ได้จริง ${baht(d.fee_charged)} (2% ขั้นต่ำ 20 ฿)`);
+  if (d.status === 'partial' && d.fee_charged != null) return noteHtml('info', `คืนบางส่วน: ค่าธรรมเนียมคิดจากยอดที่${isStay(d) ? 'เจ้าของ' : 'ผู้ขาย'}ได้จริง ${baht(d.fee_charged)} (3% ขั้นต่ำ 20 ฿)`);
   return '';
 }
 function stayCancelSheet() {

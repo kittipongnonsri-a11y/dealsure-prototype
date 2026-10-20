@@ -46,7 +46,7 @@ def run(db):
         n[0] += 1
         b = rnd.choice(buyers)
         t0 = now - age_days * DAY
-        fee = round(max(20, price * 0.02), 2); bf = round(fee / 2, 2); sf = round(fee - bf, 2)
+        fee = round(max(20, price * 0.03), 2); bf = round(fee / 2, 2); sf = round(fee - bf, 2)
         dlv = rnd.choice(['parcel', 'parcel', 'parcel', 'meet', 'messenger'])
         due = time.strftime('%Y-%m-%d', time.localtime(t0 + 3 * DAY))
         did = ex("""INSERT INTO deals(code,creator_id,creator_role,seller_id,buyer_id,source,title,price,photos,delivery,due_date,fee_payer,fee,
@@ -117,7 +117,7 @@ def run_stay(db):
         g = rnd.choice(guests)
         t0 = now - (500 - i * 14) * DAY
         cin = t0 + 10 * DAY
-        fee = round(max(20, price * 0.02), 2); bf = round(fee / 2, 2); sf = round(fee - bf, 2)
+        fee = round(max(20, price * 0.03), 2); bf = round(fee / 2, 2); sf = round(fee - bf, 2)
         due = time.strftime('%Y-%m-%d', time.localtime(cin))
         did = ex("""INSERT INTO deals(code,creator_id,creator_role,seller_id,buyer_id,source,title,description,price,photos,delivery,due_date,fee_payer,fee,
                 buyer_fee,seller_fee,buyer_pay,seller_get,status,created_at,accepted_at,paid_at,completed_at,release_reason,payout_amount,is_demo,
@@ -208,7 +208,7 @@ def run_v4(db):
             n[0] += 1
             b = buyers[(n[0] * 5) % len(buyers)]
             t0 = now - (age + 4) * 86400
-            fee = round(max(20, price * 0.02), 2); bf = round(fee / 2, 2); sf = round(fee - bf, 2)
+            fee = round(max(20, price * 0.03), 2); bf = round(fee / 2, 2); sf = round(fee - bf, 2)
             due = time.strftime('%Y-%m-%d', time.localtime(t0 + 3 * 86400))
             did = ex("""INSERT INTO deals(code,creator_id,creator_role,seller_id,buyer_id,source,title,price,photos,delivery,due_date,fee_payer,fee,
                     buyer_fee,seller_fee,buyer_pay,seller_get,status,on_time,created_at,accepted_at,paid_at,shipped_at,delivered_at,completed_at,

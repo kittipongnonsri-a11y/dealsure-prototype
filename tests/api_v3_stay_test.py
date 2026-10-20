@@ -60,7 +60,7 @@ code = mk(H)
 d = C().ok('/deals/' + code)
 check('คนเปิดลิงก์เห็นข้อมูลที่พัก + ความน่าเชื่อถือเจ้าของ', d['kind'] == 'stay' and d['address'] and d['map_url'] == MAP and d['nights'] == 2 and d['guests'] == 2
       and d['seller']['stats'] is not None and 'stays_hosted' in d['seller']['stats'] and d['actions'] == ['accept'])
-check('ค่าธรรมเนียม 2% คนละครึ่ง', d['fee'] == 48 and d['buyer_pay'] == 2424 and d['seller_get'] == 2376)
+check('ค่าธรรมเนียม 3% คนละครึ่ง', d['fee'] == 72 and d['buyer_pay'] == 2436 and d['seller_get'] == 2364)
 check('เวลาเช็คอิน 14:00 ตามเวลาไทย', datetime.fromtimestamp(d['checkin_at'], TZ).strftime('%Y-%m-%d %H:%M') == bkk_date(5) + ' 14:00')
 G.ok(f'/deals/{code}/accept', {})
 check('รับดีลแล้ว = รอจ่าย', deal(G, code)['status'] == 'accepted' and 'pay' in deal(G, code)['actions'])
@@ -101,7 +101,7 @@ print('5) ผู้เข้าพักเป็นคนสร้างดี�
 code2 = G.ok('/deals', stay(G, role='buyer', price=1500, fee_payer='seller'))['code']
 check('ดีลที่ผู้เข้าพักสร้าง รอเจ้าของกดรับ', deal(G, code2)['status'] == 'open' and deal(G, code2)['buyer']['id'] == ug['id'])
 H.ok(f'/deals/{code2}/accept', {}); G.ok(f'/deals/{code2}/pay', {})
-check('เจ้าของจ่ายค่าธรรมเนียม (ขั้นต่ำ 30)', deal(G, code2)['buyer_pay'] == 1500 and deal(H, code2)['seller_get'] == 1470)
+check('เจ้าของจ่ายค่าธรรมเนียม 3% (45)', deal(G, code2)['buyer_pay'] == 1500 and deal(H, code2)['seller_get'] == 1455)
 H.ok(f'/deals/{code2}/skip', {'to': 'checkin'})
 s, e = H.req(f'/deals/{code2}/confirm', {})
 check('เจ้าของกดยืนยันแทนผู้เข้าพักไม่ได้', s == 403)

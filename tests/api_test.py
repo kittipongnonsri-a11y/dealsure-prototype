@@ -68,7 +68,7 @@ print('1) ล็อกอิน + OTP'); check('A และ B ล็อกอิ
 print('2) ดีลส่งพัสดุ: สร้าง → รับ → จ่าย → ส่ง → ของถึง → เร่งเวลา → ปล่อยเงินอัตโนมัติ')
 code = new_deal(A, title='กล้องฟิล์มทดสอบ', price=2500)
 d = deal(B, code)
-check('ค่าธรรมเนียม 2% คนละครึ่ง', d['fee'] == 50 and d['buyer_pay'] == 2525 and d['seller_get'] == 2475, d)
+check('ค่าธรรมเนียม 3% คนละครึ่ง', d['fee'] == 75 and d['buyer_pay'] == 2537.5 and d['seller_get'] == 2462.5, d)
 check('ผู้ซื้อเห็นปุ่มรับดีล + โปรไฟล์ผู้ขาย', 'accept' in d['actions'] and d['seller']['name'] == 'ผู้ขายทดสอบ A')
 B.ok(f'/deals/{code}/accept', {})
 s, e = X.req(f'/deals/{code}')
@@ -119,7 +119,7 @@ s, e = B.req(f'/deals/{code}/meet-code', {'code': wrong})
 check('รหัสผิดถูกปฏิเสธ', s == 400)
 B.ok(f'/deals/{code}/meet-code', {'code': da['meet_code']})
 d = deal(A, code)
-check('รหัสถูก → ปล่อยเงินทันที', d['status'] == 'completed' and d['release_reason'] == 'meet_code' and d['seller_get'] == 780)
+check('รหัสถูก → ปล่อยเงินทันที', d['status'] == 'completed' and d['release_reason'] == 'meet_code' and d['seller_get'] == 776)
 
 print('5) ข้อพิพาท + แอดมินตัดสิน (คืนบางส่วน / คืนเต็ม / ปล่อยเงิน)')
 codes = []
@@ -146,9 +146,9 @@ ADM.ok(f'/admin/deals/{codes[0]}/resolve', {'decision': 'partial', 'refund_amoun
 ADM.ok(f'/admin/deals/{codes[1]}/resolve', {'decision': 'refund'})
 ADM.ok(f'/admin/deals/{codes[2]}/resolve', {'decision': 'release'})
 d0, d1, d2 = deal(A, codes[0]), deal(A, codes[1]), deal(A, codes[2])
-# v6: คืนบางส่วน → ค่าธรรมเนียมคิดจากยอดที่ผู้ขายได้จริง: (1515−500)=1015 · ค่าธรรมเนียม 2% = 20.30 · ผู้ขายได้ 994.70
-check('คืนบางส่วน: ผู้ซื้อได้ 500 ผู้ขายได้ 994.70 (ค่าธรรมเนียม 20.30 จากยอดที่ผู้ขายได้)', d0['status'] == 'partial' and d0['refund_amount'] == 500 and d0['payout_amount'] == 994.7 and d0['fee_charged'] == 20.3)
-check('คืนเต็ม', d1['status'] == 'refunded' and d1['refund_amount'] == 1515)
+# v12: คืนบางส่วน → ค่าธรรมเนียมคิดจากยอดที่ผู้ขายได้จริง: (1522.50−500)=1022.50 · ค่าธรรมเนียม 3% = 30.68 · ผู้ขายได้ 991.82
+check('คืนบางส่วน: ผู้ซื้อได้ 500 ผู้ขายได้ 991.82 (ค่าธรรมเนียม 3% = 30.68 จากยอดที่ผู้ขายได้)', d0['status'] == 'partial' and d0['refund_amount'] == 500 and abs(d0['fee_charged'] - 30.68) < 0.011 and abs(d0['payout_amount'] - (1022.5 - d0['fee_charged'])) < 0.001, d0)
+check('คืนเต็ม', d1['status'] == 'refunded' and d1['refund_amount'] == 1522.5)
 check('ปล่อยเงิน', d2['status'] == 'completed' and d2['release_reason'] == 'admin')
 
 print('6) ส่งช้า: ผู้ซื้อขอเงินคืนหลังวันที่ตกลง')

@@ -67,7 +67,7 @@ with sync_playwright() as p:
     fill_stay(H, 'บ้านพักริมน้ำ ห้องวิวสวน (ทดสอบ)', 2400, cin=6, photo=HOUSE)
     H.fill('#fDesc', 'ห้องนอน 1 ห้อง · อาหารเช้า 2 ที่ · ที่จอดรถ')
     expect(H.locator('#sDates')).to_contain_text('2 คืน'); expect(H.locator('#sMapHint')).to_contain_text('ลิงก์ Google Maps')
-    expect(H.locator('#fBuyer')).to_have_text('2,424 ฿')
+    expect(H.locator('#fBuyer')).to_have_text('2,436 ฿')
     shot(H, '01-create-accommodation-deal', full=True)
     link = submit_deal(H); code = link.rsplit('/', 1)[1]
     assert 'ดีลที่พัก' in H.evaluate('S.shareMsg'), H.evaluate('S.shareMsg')

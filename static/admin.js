@@ -105,7 +105,7 @@ async function load() {
         </div>
         <div class="note mt8"><div class="small">ตัดสินจาก<b>หลักฐานการส่ง (เลขพัสดุ/รูปส่งมอบ) วิดีโอแพ็กของ วิดีโอแกะกล่อง และแชท</b> ·
           ${d.dispute_reason === 'ขอยกเลิกหลังหมดเวลายกเลิกฟรี' ? `ตัดสินให้ผู้เข้าพัก: ถือว่ายกเลิกเอง หักค่าดำเนินการ ${baht(Math.max(10, d.buyer_pay * 0.02))}` : `ตัดสินให้${d.kind === 'stay' ? 'ผู้เข้าพัก' : 'ผู้ซื้อ'}: ${d.kind === 'stay' ? 'เจ้าของ' : 'ผู้ขาย'}ผิด → ได้คืนเต็ม ${baht(d.buyer_pay)} + ค่าปรับ ${baht(d.fee)} · ตัดสินให้${d.kind === 'stay' ? 'เจ้าของ' : 'ผู้ขาย'}: ${d.kind === 'stay' ? 'ผู้เข้าพัก' : 'ผู้ซื้อ'}แพ้ข้อพิพาท (บันทึกประวัติ)`} ·
-          แบ่งเงิน: ค่าธรรมเนียมคิดจากยอดที่${d.kind === 'stay' ? 'เจ้าของ' : 'ผู้ขาย'}ได้จริง (2% ขั้นต่ำ 20 ฿)</div></div>
+          แบ่งเงิน: ค่าธรรมเนียมคิดจากยอดที่${d.kind === 'stay' ? 'เจ้าของ' : 'ผู้ขาย'}ได้จริง (3% ขั้นต่ำ 20 ฿)</div></div>
         <label class="lb">บันทึกถึงทั้งสองฝ่าย (ไม่บังคับ)</label><input class="input" id="note-${d.code}" maxlength="300" placeholder="เช่น ตรวจคลิปแล้ว ของเสียหายจริง">
         <div class="twobtn mt12"><button class="btn primary sm" onclick="resolve('${d.code}','refund')">คืนเงิน${d.kind === 'stay' ? 'ผู้เข้าพัก' : 'ผู้ซื้อ'}ทั้งหมด</button><button class="btn ghost sm" onclick="resolve('${d.code}','release')">ปล่อยเงินให้${d.kind === 'stay' ? 'เจ้าของที่พัก' : 'ผู้ขาย'}</button></div>
         <div class="codein mt8"><input class="input" id="amt-${d.code}" inputmode="decimal" placeholder="คืน${d.kind === 'stay' ? 'ผู้เข้าพัก' : 'ผู้ซื้อ'} (บาท)" style="max-width:none;flex:1"><button class="btn ghost sm" style="flex:1" onclick="resolve('${d.code}','partial')">คืนบางส่วน</button></div>

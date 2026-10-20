@@ -49,8 +49,8 @@ with sync_playwright() as p:
     S.click('#createBtn'); wait_text(S, 'ยอดดีลขั้นต่ำ 100 บาท')
     S.fill('#price', '1500')
     expect(S.locator('#fPayout')).to_contain_text(RULE)
-    expect(S.locator('#fCancel')).to_contain_text('ค่าดำเนินการ 30.30 ฿')
-    expect(S.locator('#fCancel')).to_contain_text('ได้คืนเต็ม 1,515 ฿')
+    expect(S.locator('#fCancel')).to_contain_text('ค่าดำเนินการ 30.45 ฿')
+    expect(S.locator('#fCancel')).to_contain_text('ได้คืนเต็ม 1,522.50 ฿')
     S.locator('#feeSeg').scroll_into_view_if_needed(); S.evaluate("document.querySelector('#feeSeg').closest('.card').scrollIntoView({block:'start'})")
     snap(S, '01-create-fee-breakdown')
     snap(S, '01b-create-fee-breakdown-card', el="xpath=//div[@id='feeSeg']/ancestor::div[contains(@class,'card')][1]")
@@ -59,24 +59,24 @@ with sync_playwright() as p:
     print('2) ผู้ซื้อรับดีล → หน้าจ่ายเงินแสดงค่าใช้จ่ายทั้งหมดก่อนจ่าย')
     B.goto(link); B.click('text=เข้าสู่ระบบเพื่อรับดีล'); login(B, 'ผู้ซื้อ v6 (ทดสอบ)', '0872' + stamp)
     B.goto(link); B.click('text=รับดีล แล้วไปจ่ายเงิน'); B.wait_for_selector('text=จ่ายด้วย')
-    B.click('text=จ่ายด้วย'); expect(B.locator('#payCharges')).to_contain_text('ค่าดำเนินการ 30.30 ฿')
+    B.click('text=จ่ายด้วย'); expect(B.locator('#payCharges')).to_contain_text('ค่าดำเนินการ 30.45 ฿')
     expect(B.locator('#payCharges')).to_contain_text(RULE)
     B.evaluate("document.querySelector('#payCharges').scrollIntoView({block:'center'})"); snap(B, '02-pay-sheet-all-charges')
     B.click('#payBtn'); B.wait_for_selector('#buyerCancelBtn')
 
     print('3) ผู้ซื้อยกเลิกก่อนผู้ขายส่งของ → หน้ายืนยันแสดงค่าดำเนินการ')
-    expect(B.locator('#buyerCancelBtn')).to_contain_text('ค่าดำเนินการ 30.30 ฿')
-    B.click('#buyerCancelBtn'); expect(B.locator('#cancelBreak')).to_contain_text('−30.30 ฿')
-    expect(B.locator('#cancelBreak')).to_contain_text('1,484.70 ฿'); expect(B.locator('#cxBtn')).to_contain_text('รับคืน 1,484.70 ฿')
+    expect(B.locator('#buyerCancelBtn')).to_contain_text('ค่าดำเนินการ 30.45 ฿')
+    B.click('#buyerCancelBtn'); expect(B.locator('#cancelBreak')).to_contain_text('−30.45 ฿')
+    expect(B.locator('#cancelBreak')).to_contain_text('1,492.05 ฿'); expect(B.locator('#cxBtn')).to_contain_text('รับคืน 1,492.05 ฿')
     snap(B, '03-buyer-cancel-sheet-with-charge')
-    B.click('#cxBtn'); wait_text(B, 'หักค่าดำเนินการ 30.30 ฿')
+    B.click('#cxBtn'); wait_text(B, 'หักค่าดำเนินการ 30.45 ฿')
     snap(B, '04-buyer-cancelled-refund-minus-charge')
 
     print('4) ผู้ขายยกเลิกหลังผู้ซื้อจ่าย → หน้ายืนยันแสดงค่าปรับ')
     code2 = api_deal(S, B, 2000)
     S.goto(BASE + '/#/d/' + code2); S.wait_for_selector('#sellerCancelBtn')
-    expect(S.locator('#sellerCancelBtn')).to_contain_text('ค่าปรับ 40 ฿')
-    S.click('#sellerCancelBtn'); expect(S.locator('#cancelBreak')).to_contain_text('2,020 ฿'); expect(S.locator('#cancelBreak')).to_contain_text('40 ฿')
+    expect(S.locator('#sellerCancelBtn')).to_contain_text('ค่าปรับ 60 ฿')
+    S.click('#sellerCancelBtn'); expect(S.locator('#cancelBreak')).to_contain_text('2,030 ฿'); expect(S.locator('#cancelBreak')).to_contain_text('60 ฿')
     snap(S, '05-seller-cancel-sheet-penalty')
     S.click('#cxBtn'); wait_text(S, 'หักจากยอดโอนรอบถัดไป')
     snap(S, '06-seller-deal-penalty-note')
@@ -90,11 +90,11 @@ with sync_playwright() as p:
 
     print('6) หน้าเงินขายของฉัน: ยอดรวม − ค่าโอนออก − ค่าปรับ')
     S.goto(BASE + '/#/me'); S.wait_for_selector('#payoutCard')
-    expect(S.locator('#payBreak')).to_contain_text('−30 ฿')        # 890 < 1,000 → ค่าโอนออก 30
-    expect(S.locator('#payBreak')).to_contain_text('−40 ฿')        # ค่าปรับ 40
+    expect(S.locator('#payBreak')).to_contain_text('−30 ฿')        # 886.50 < 1,000 → ค่าโอนออก 30
+    expect(S.locator('#payBreak')).to_contain_text('−60 ฿')        # ค่าปรับ 60
     expect(S.locator('#payBreak')).to_contain_text(RULE)
-    expect(S.locator('#penaltyBox')).to_contain_text('ค่าปรับค้างหัก 40 ฿')
-    expect(S.locator('#payNet')).to_have_text('820 ฿')             # 890 − 30 − 40
+    expect(S.locator('#penaltyBox')).to_contain_text('ค่าปรับค้างหัก 60 ฿')
+    expect(S.locator('#payNet')).to_have_text('796.50 ฿')          # 886.50 − 30 − 60
     S.evaluate("document.querySelector('#payoutCard').scrollIntoView({block:'start'})")
     snap(S, '08-seller-payout-fee-penalty')
     snap(S, '08b-seller-payout-card', el='#payoutCard')
