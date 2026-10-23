@@ -49,8 +49,8 @@ def wait_text(pg, t, timeout=10000):
 with sync_playwright() as p:
     br = p.chromium.launch(headless=True)
     S = phone(br, 'seller')
-    S.goto(BASE + '/'); login(S, 'ร้านค่าธรรมเนียม v12', '088' + stamp + '1')
-    S.goto(BASE + '/#/create'); S.wait_for_selector('#price')
+    S.goto(BASE + '/app'); login(S, 'ร้านค่าธรรมเนียม v12', '088' + stamp + '1')
+    S.goto(BASE + '/app#/create'); S.wait_for_selector('#price')
     if S.locator('#fTitle').count(): S.fill('#fTitle', 'กล้องฟิล์ม (ทดสอบ v12)')
     S.fill('#price', '2500')
     expect(S.locator('#fFee')).to_contain_text('75')

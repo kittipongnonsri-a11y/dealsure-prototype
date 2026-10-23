@@ -1,0 +1,142 @@
+<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0B766E"><link rel="manifest" href="/manifest.json"><link rel="icon" type="image/png" href="/static/logo/favicon-32.png"><link rel="apple-touch-icon" href="/static/logo/apple-touch-icon.png"><meta name="description" content="ดีลชัวร์ ตัวกลางพักเงินสำหรับซื้อขายในกลุ่ม Facebook / LINE และจองที่พัก ผู้ขายได้เงินเมื่อผู้ซื้อยืนยันรับของ">
+<title>ดีลชัวร์ DealSure — ตัวกลางพักเงินปลอดภัย</title>
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--teal:#0B766E;--teal2:#14B8A6;--navy:#134E4A;--blue:#1450A3;--mint:#EAF6F2;--gold:#C8962E;--gold-l:#FFF6E0;--ink:#16243A;--muted:#64748B;--line:#E3E8EF;--bg:#F3F6FA}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Sarabun','Prompt',sans-serif;color:var(--ink);font-size:15px;line-height:1.6;background:var(--bg)}
+h1,h2,h3,.btn,.num{font-family:'Prompt','Sarabun',sans-serif}
+.wrap{max-width:430px;margin:0 auto;background:#fff}
+section{padding:36px 20px}
+h2{font-size:22px;font-weight:600;margin-bottom:6px}
+.lead{color:var(--muted);font-size:14px;margin-bottom:18px}
+.hero{background:linear-gradient(135deg,var(--navy),var(--teal) 55%,var(--teal2));color:#fff;padding:20px 20px 44px}
+.nav{display:flex;align-items:center;gap:10px;font-family:Prompt;font-weight:600;font-size:18px}
+.nav img{width:36px;height:36px;border-radius:10px}
+.nav a{margin-left:auto;color:#fff;font-size:13px;font-weight:500;text-decoration:none;border:1px solid rgba(255,255,255,.5);padding:4px 12px;border-radius:20px}
+.hero h1{font-size:28px;line-height:1.35;margin:36px 0 12px;font-weight:700}
+.hero p{opacity:.9;font-size:15.5px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0 24px}.chips span{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);font-size:12.5px;padding:3px 10px;border-radius:20px}
+.btn{display:block;text-align:center;padding:14px;border-radius:14px;font-weight:600;font-size:16px;text-decoration:none;margin-bottom:10px}
+.btn.p{background:#fff;color:var(--teal)}
+.btn.big{background:linear-gradient(180deg,#FFD66B,#F5B833);color:#13312E;font-size:18px;font-weight:700;padding:17px 22px;box-shadow:0 10px 24px rgba(0,0,0,.25),inset 0 -2px 0 rgba(0,0,0,.12);display:flex;align-items:center;justify-content:center;gap:10px;transition:transform .15s}.btn.s{display:flex;align-items:center;justify-content:center}.btn.big:hover{transform:translateY(-2px)}.btn.big .pl{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:#13312E;color:#FFD66B;font-size:18px;line-height:1}.btn.big small{display:block;font-size:12.5px;font-weight:500;opacity:.8;font-family:Sarabun}
+.live{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--teal);background:#fff;border:1px solid #BFEDE6;border-radius:20px;padding:2px 10px;vertical-align:middle;margin-left:8px;font-family:Sarabun;font-weight:600}.live i{width:8px;height:8px;border-radius:50%;background:#10B981;animation:pulse 1.6s infinite}@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(16,185,129,.6)}100%{box-shadow:0 0 0 8px rgba(16,185,129,0)}}
+.num{font-variant-numeric:tabular-nums}.stats[hidden]{display:none}.btn.s{border:1.5px solid rgba(255,255,255,.7);color:#fff}
+.stats{background:var(--mint)}
+.tag{display:inline-block;background:var(--gold-l);color:#7A4E0B;border:1px dashed var(--gold);font-size:11.5px;padding:1px 8px;border-radius:8px;vertical-align:middle;margin-left:6px}
+.stat{background:#fff;border-radius:16px;padding:16px;margin-bottom:10px;border:1px solid #BFEDE6}
+.num{font-size:32px;font-weight:700;color:var(--teal)}.stat div{color:var(--muted);font-size:14px}
+.step{display:flex;gap:14px;margin-bottom:16px}.step b{flex:0 0 38px;height:38px;border-radius:50%;background:var(--teal);color:#fff;display:grid;place-items:center;font-family:Prompt}
+.step h3{font-size:16px;font-weight:600}.step p{font-size:13.5px;color:var(--muted)}
+.card{border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-bottom:10px}.card h3{font-size:16px;margin-bottom:2px}.card p{font-size:13.5px;color:var(--muted)}
+.lv{display:flex;gap:6px;margin-top:8px}.lv span{font-size:12px;padding:2px 10px;border-radius:20px;font-weight:600}
+.planned{font-size:11.5px;background:#EAF1FB;color:var(--blue);padding:1px 8px;border-radius:8px;margin-left:4px}
+.fees{background:var(--bg)}.fee{display:flex;justify-content:space-between;gap:10px;background:#fff;padding:13px 16px;border-radius:12px;margin-bottom:8px;font-size:14.5px}.fee b{color:var(--teal);font-family:Prompt;white-space:nowrap}
+.note{font-size:12.5px;color:var(--muted);margin-top:8px}
+details{border-bottom:1px solid var(--line);padding:13px 0}summary{font-weight:600;cursor:pointer}details p{color:var(--muted);font-size:14px;margin-top:6px}
+.a2hs{margin:0 20px 30px;background:var(--gold-l);border-radius:16px;padding:14px 16px;font-size:14px}
+footer{background:var(--navy);color:#cfe;padding:24px 20px;font-size:13px}footer a{color:#fff}
+.nav .cta,.nav .links,.phone{display:none}
+@media(min-width:768px){
+.wrap{max-width:none}
+section,.hero,footer{padding-left:max(40px,calc((100% - 1120px)/2));padding-right:max(40px,calc((100% - 1120px)/2))}
+section{padding-top:64px;padding-bottom:64px}
+h2{font-size:30px}.lead{font-size:16px;margin-bottom:28px}
+.hero{padding-top:22px;padding-bottom:72px}
+.nav{font-size:20px}.nav .cta{display:inline-block;background:#fff;color:var(--teal);border-color:#fff;font-weight:600}.nav .cta+a{margin-left:0}
+.nav a{padding:7px 18px;font-size:14px}
+.hero-in{display:grid;grid-template-columns:1fr 300px;gap:40px;align-items:center;margin-top:40px}
+.hero h1{font-size:36px;margin-top:0}
+.btns{display:flex;gap:12px}.btn{padding:14px 28px;margin:0}
+.phone{display:block;justify-self:center;width:280px;height:560px;background:#0d1f2d;border-radius:40px;padding:12px;box-shadow:0 30px 60px rgba(0,0,0,.35),inset 0 0 0 2px rgba(255,255,255,.15);transform:rotate(3deg)}
+.scr{background:var(--bg);color:var(--ink);height:100%;border-radius:30px;padding:22px 16px;overflow:hidden}
+.ph-top{display:flex;align-items:center;gap:8px;font-family:Prompt;font-weight:600;margin-bottom:14px}.ph-top img{width:28px;height:28px;border-radius:8px}
+.ph-card{background:linear-gradient(135deg,var(--navy),var(--teal));color:#fff;border-radius:18px;padding:14px}.ph-card small{opacity:.8}.ph-card h4{font-family:Prompt;font-size:16px}
+.amt{font-family:Prompt;font-size:26px;font-weight:700}.ph-st{margin-top:6px;background:rgba(255,255,255,.18);display:inline-block;padding:2px 10px;border-radius:12px;font-size:12.5px}
+.ph-tl{list-style:none;margin:16px 4px;font-size:13.5px}.ph-tl li{padding:7px 0 7px 26px;position:relative;color:var(--muted);border-left:2px solid var(--line);margin-left:8px}
+.ph-tl li:before{content:"";position:absolute;left:-8px;top:10px;width:14px;height:14px;border-radius:50%;background:#fff;border:2px solid var(--line)}
+.ph-tl li.ok{color:var(--ink)}.ph-tl li.ok:before{background:var(--teal);border-color:var(--teal)}.ph-tl li.now{color:var(--teal);font-weight:600}.ph-tl li.now:before{border-color:var(--teal)}
+.ph-btn{background:var(--teal);color:#fff;text-align:center;border-radius:12px;padding:11px;font-family:Prompt;font-weight:600}
+.g{display:grid;gap:16px}.g>*{margin:0!important}
+.g3{grid-template-columns:repeat(3,1fr)}.stat{padding:22px}
+.g5{grid-template-columns:repeat(5,1fr);gap:14px}.step b{flex:none;width:38px}.step{flex-direction:column;background:var(--bg);border-radius:16px;padding:20px}
+.g3c{grid-template-columns:repeat(2,1fr)}.card{padding:20px}.card h3{font-size:17px}
+.g2{grid-template-columns:repeat(2,1fr)}.fee{padding:18px 20px}
+.faq-in{max-width:800px}
+.a2hs{max-width:1120px;margin:0 auto 40px}
+}
+@media(min-width:768px) and (max-width:1023px){.g5{grid-template-columns:repeat(3,1fr)}.hero-in{grid-template-columns:1fr 240px;gap:24px}.phone{width:250px;height:580px;transform:none}.scr{padding:18px 12px}.amt{font-size:22px}.ph-tl{margin:12px 2px;font-size:12.5px}.ph-tl li{padding:5px 0 5px 22px}.hero h1{font-size:30px}}
+@media(min-width:1024px){.nav .links{display:flex;gap:26px;margin-left:auto;margin-right:12px}.nav .links a{border:0;padding:0;margin:0;opacity:.9;font-weight:500}.nav .cta{margin-left:0}
+.hero-in{grid-template-columns:1.2fr 1fr;margin-top:56px}.hero h1{font-size:46px}.hero p{font-size:17px;max-width:560px}.phone{width:300px;height:600px}
+.g3c{grid-template-columns:repeat(3,1fr)}.g3c>:nth-child(4),.g3c>:nth-child(5){grid-column:span 1}.g3c{grid-template-columns:repeat(6,1fr)}.g3c>*{grid-column:span 2}.g3c>:nth-child(4){grid-column:2/span 2}.g3c>:nth-child(5){grid-column:4/span 2}}
+@media(max-width:1023px){.nav .cta{margin-left:auto}}
+</style></head><body><div class="wrap">
+<header class="hero" id="hero">
+<div class="nav"><img src="/static/logo/logo.svg" alt="">ดีลชัวร์<span class="links"><a href="#how">วิธีใช้งาน</a><a href="#safety">ความปลอดภัย</a><a href="#fees">ค่าธรรมเนียม</a><a href="#faq">คำถาม</a></span><a class="cta" href="/app#/create">สร้างดีล</a><a class="login" href="/app#/login">เข้าสู่ระบบ</a></div>
+<div class="hero-in"><div class="hero-txt"><h1>ตัวกลางพักเงินปลอดภัย<br>ซื้อขายสบายใจ ไม่โดนโกง</h1>
+<p>สำหรับการซื้อขายในกลุ่ม Facebook / LINE และการจองที่พัก — ผู้ขายได้เงินเมื่อผู้ซื้อยืนยันว่าได้รับของแล้วเท่านั้น</p>
+<div class="chips"><span>🛍️ ซื้อขายในกลุ่ม</span><span>🏠 จองที่พัก</span><span>💸 PromptPay</span></div>
+<div class="btns"><a class="btn big" id="ctaMain" href="/app#/create"><span class="pl">+</span><span>เริ่มใช้งาน · สร้างดีลเลย<small>ฟรี ไม่มีค่าสมัคร ใช้เวลาไม่ถึง 1 นาที</small></span></a><a class="btn s" href="/app#/login">เข้าสู่ระบบ</a></div>
+</div><div class="phone" aria-hidden="true"><div class="scr"><div class="ph-top"><img src="/static/logo/logo.svg" alt="">ดีลชัวร์</div><div class="ph-card"><small>ดีล #DS-1024</small><h4>iPhone 13 มือสอง</h4><div class="amt">฿12,500 <span class="tag">ตัวอย่าง</span></div><div class="ph-st">🔒 เงินพักไว้แล้ว</div></div><ol class="ph-tl"><li class="ok">ผู้ซื้อจ่ายเงิน</li><li class="ok">เงินพักไว้</li><li class="now">ผู้ขายส่งของ</li><li>ผู้ซื้อยืนยันรับ</li><li>ผู้ขายได้เงิน</li></ol><div class="ph-btn">ยืนยันได้รับของ</div></div></div></div>
+</header>
+<section class="stats" id="stats" hidden><h2>ดีลชัวร์ในตัวเลข <span class="live"><i></i>อัปเดตสด</span></h2><p class="lead">ตัวเลขจริงจากระบบ อัปเดตอัตโนมัติ</p>
+<div class="g g3"><div class="stat"><span class="num" data-k="users">0</span><div>สมาชิกที่ไว้วางใจเรา (คน)</div></div>
+<div class="stat"><span class="num" data-k="completed_amount">0</span><div>ยอดเงินที่ซื้อขายอย่างปลอดภัย (บาท)</div></div>
+<div class="stat"><span class="num" data-k="completed_deals">0</span><div>ดีลที่สำเร็จแล้ว (ดีล)</div></div></div></section>
+<section id="how"><h2>ใช้งานง่าย 5 ขั้นตอน</h2><p class="lead">เงินไม่ถึงมือผู้ขายจนกว่าคุณจะได้ของ</p>
+<div class="g g5"><div class="step"><b>1</b><div><h3>ผู้ซื้อจ่ายเงิน</h3><p>ชำระผ่านลิงก์ดีลด้วย PromptPay หรือบัตร</p></div></div>
+<div class="step"><b>2</b><div><h3>เงินพักไว้</h3><p>เงินถูกพักไว้ ผู้ขายยังถอนไม่ได้</p></div></div>
+<div class="step"><b>3</b><div><h3>ผู้ขายส่งของ</h3><p>แนบเลขพัสดุและคลิปแพ็กของเป็นหลักฐาน</p></div></div>
+<div class="step"><b>4</b><div><h3>ผู้ซื้อยืนยันรับ</h3><p>ถ่ายคลิปแกะกล่อง ตรวจของ แล้วกดยืนยัน</p></div></div>
+<div class="step"><b>5</b><div><h3>ผู้ขายได้เงิน</h3><p>ระบบโอนเงินให้ผู้ขายทันทีหลังยืนยัน</p></div></div></div></section>
+<section id="safety" style="background:var(--mint)"><h2>ปลอดภัยทุกขั้นตอน</h2><p class="lead">ออกแบบมาเพื่อลดการโกงในการซื้อขายออนไลน์</p>
+<div class="g g3c"><div class="card" style="background:#fff"><h3>🎥 หลักฐานคลิปแพ็ก/แกะกล่อง</h3><p>ทั้งสองฝ่ายอัปโหลดคลิปเก็บไว้ในดีล ใช้ตรวจสอบได้หากมีปัญหา</p></div>
+<div class="card" style="background:#fff"><h3>🤝 ช่วยไกล่เกลี่ยข้อพิพาท</h3><p>แจ้งปัญหาได้ในดีล ทีมงานตรวจหลักฐานก่อนตัดสินการโอนเงิน</p></div>
+<div class="card" style="background:#fff"><h3>🪪 ยืนยันตัวตน</h3><p>ผู้ขายยืนยันตัวตนก่อนรับเงิน ลดความเสี่ยงบัญชีปลอม</p></div>
+<div class="card" style="background:#fff"><h3>🏅 ระดับร้านค้า</h3><p>ดูความน่าเชื่อถือจากประวัติดีลที่สำเร็จ</p><div class="lv"><span style="background:#F5DDB0;color:#7A4E0B">Bronze</span><span style="background:#E5E9F0;color:#33435C">Silver</span><span style="background:#FCD77E;color:#6B4A07">Gold</span></div></div>
+<div class="card" style="background:#fff"><h3>🏦 การพักเงิน <span class="planned">แผนงาน</span></h3><p>เรามีแผนให้การพักเงินดำเนินการผ่านผู้ให้บริการชำระเงินที่ได้รับอนุญาต</p></div></div></section>
+<section class="fees" id="fees"><h2>ค่าธรรมเนียมชัดเจน</h2><p class="lead">ไม่มีค่าสมัคร ไม่มีรายเดือน</p>
+<div class="g g2"><div class="fee"><span>ค่าธรรมเนียมดีล</span><b>3% (ขั้นต่ำ 20 บาท)</b></div>
+<div class="fee"><span>ชำระด้วย PromptPay</span><b>ไม่มีค่าเพิ่ม</b></div>
+<div class="fee"><span>ชำระด้วยบัตร</span><b>+4% + 11 บาท</b></div>
+<div class="fee"><span>ยกเลิกดีลหลังชำระ</span><b>มีค่าดำเนินการ</b></div>
+</div><p class="note">รายละเอียดค่าดำเนินการกรณียกเลิกดูได้ในเงื่อนไขการใช้งาน</p></section>
+<section id="faq"><h2>คำถามที่พบบ่อย</h2><div class="faq-in">
+<details open><summary>ถ้าไม่ได้รับของ จะได้เงินคืนไหม?</summary><p>แจ้งข้อพิพาทในดีลก่อนกดยืนยันรับ ทีมงานจะตรวจหลักฐานและพิจารณาคืนเงินตามเงื่อนไข</p></details>
+<details><summary>ใครเป็นคนจ่ายค่าธรรมเนียม?</summary><p>ตกลงกันได้ระหว่างผู้ซื้อและผู้ขายตอนสร้างดีล</p></details>
+<details><summary>ใช้กับการจองที่พักได้อย่างไร?</summary><p>เงินจะพักไว้จนผู้เข้าพักเช็กอินและยืนยันว่าที่พักตรงตามที่ตกลง</p></details>
+<details><summary>ต้องดาวน์โหลดแอปไหม?</summary><p>ไม่ต้อง ใช้ผ่านเว็บได้เลย และเพิ่มลงหน้าจอโฮมได้</p></details></div></section>
+<div class="a2hs" id="a2hs">📲 <b>เพิ่มดีลชัวร์ลงหน้าจอโฮม</b><br>iPhone: กด แชร์ → “เพิ่มไปยังหน้าจอโฮม” · Android: กด ⋮ → “เพิ่มลงในหน้าจอหลัก”</div>
+<footer><b style="font-family:Prompt;font-size:16px;color:#fff">ดีลชัวร์ DealSure</b><p style="margin:6px 0 12px">ตัวกลางพักเงินสำหรับซื้อขายออนไลน์</p><a href="/terms">เงื่อนไขการใช้งาน</a> · <a href="#">ติดต่อเรา</a><p style="margin-top:12px;opacity:.7">© 2026 DealSure</p></footer>
+</div><script>
+// เปลี่ยนเส้นทางลิงก์เก่าแบบ /#/... และการกลับจาก Stripe ไปยังแอป (/app)
+if (location.hash.indexOf('#/') === 0 || location.search.indexOf('stripe_session') >= 0) location.replace('/app' + location.search + location.hash);
+(function () {
+  var sec = document.getElementById('stats'), els = sec.querySelectorAll('.num'), target = {}, shown = {}, seen = false, last = 0;
+  var fmt = function (n) { return Math.round(n).toLocaleString('en-US'); };
+  // แสดงเฉพาะค่าจริงจาก /api/stats: นับขึ้นจาก 0 เมื่อเลื่อนมาเห็น แล้วค่อยๆ ไล่ไปหาค่าจริงใหม่ทุกครั้งที่ poll (ไม่เกินค่าจริง)
+  function frame(t) {
+    var dt = Math.min(100, t - (last || t)); last = t;
+    els.forEach(function (el) {
+      var k = el.dataset.k, tg = target[k] || 0, cur = shown[k] || 0;
+      if (cur < tg) { var rate = seen === 1 ? Math.max(1, tg / 1.6) : Math.max(0.5, (tg - cur) / 25); cur = Math.min(tg, cur + rate * dt / 1000); }
+      else cur = tg;
+      shown[k] = cur; el.textContent = fmt(cur);
+    });
+    if (seen === 1 && els.length && [].every.call(els, function (el) { return shown[el.dataset.k] >= (target[el.dataset.k] || 0); })) seen = 2;
+    requestAnimationFrame(frame);
+  }
+  function poll() {
+    fetch('/api/stats', {cache: 'no-store'}).then(function (r) { return r.json(); }).then(function (s) {
+      var force = /[?&]stats=preview/.test(location.search) && /^(localhost|127\.)/.test(location.hostname);
+      if (!s.show && !force) { sec.hidden = true; return; }
+      sec.hidden = false; ['users', 'completed_amount', 'completed_deals'].forEach(function (k) { target[k] = Math.max(target[k] || 0, +s[k] || 0); });
+      if (!seen) io.observe(sec);
+    }).catch(function () {});
+  }
+  var io = new IntersectionObserver(function (es) { if (es[0].isIntersecting && !seen) { seen = 1; io.disconnect(); requestAnimationFrame(frame); } }, {threshold: .3});
+  poll(); setInterval(poll, 30000);
+})();
+if ('serviceWorker' in navigator) window.addEventListener('load', function () { navigator.serviceWorker.register('/sw.js').catch(function () {}); });
+</script></body></html>

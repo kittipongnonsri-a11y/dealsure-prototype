@@ -59,8 +59,8 @@ def get(pg, path): return pg.request.get(BASE + '/api' + path).json()
 with sync_playwright() as p:
     br = p.chromium.launch(headless=True)
     S = phone(br, 'seller'); B = phone(br, 'buyer')
-    S.goto(BASE + '/'); login(S, 'ร้านคลิป v10', '086' + stamp + '1')
-    B.goto(BASE + '/'); login(B, 'ผู้ซื้อคลิป v10', '087' + stamp + '2')
+    S.goto(BASE + '/app'); login(S, 'ร้านคลิป v10', '086' + stamp + '1')
+    B.goto(BASE + '/app'); login(B, 'ผู้ซื้อคลิป v10', '087' + stamp + '2')
     uid = get(S, '/me')['user']['id']
 
     print('1) สินค้าขายประจำมีคลิป → การ์ดมีไอคอนเล่น')

@@ -59,8 +59,8 @@ def scroll(pg, sel): pg.evaluate(f"document.querySelector('{sel}').scrollIntoVie
 with sync_playwright() as p:
     br = p.chromium.launch(headless=True)
     S = phone(br, 'seller'); B = phone(br, 'buyer')
-    S.goto(BASE + '/'); login(S, 'ร้าน v14', '092' + stamp + '1')
-    B.goto(BASE + '/'); login(B, 'ผู้ซื้อ v14', '093' + stamp + '2')
+    S.goto(BASE + '/app'); login(S, 'ร้าน v14', '092' + stamp + '1')
+    B.goto(BASE + '/app'); login(B, 'ผู้ซื้อ v14', '093' + stamp + '2')
     code = post(S, '/deals', {'role': 'seller', 'title': 'หูฟังไร้สาย (ทดสอบ Stripe v14)', 'price': 1000, 'delivery': 'parcel', 'due_date': DUE, 'fee_payer': 'half'})['code']
     post(B, f'/deals/{code}/accept', {})
     on = B.request.get(BASE + f'/api/deals/{code}').json()['stripe']['enabled']

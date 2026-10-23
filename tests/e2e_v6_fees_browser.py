@@ -43,7 +43,7 @@ with sync_playwright() as p:
     S = phone(br, 'ผู้ขาย'); B = phone(br, 'ผู้ซื้อ'); A = phone(br, 'แอดมิน')
 
     print('1) ผู้ขายสร้างดีล: ยอดขั้นต่ำ 100 + ตารางค่าธรรมเนียม/ค่าโอนออก/ถ้ายกเลิก')
-    S.goto(BASE + '/'); login(S, 'ผู้ขาย v6 (ทดสอบ)', '0871' + stamp)
+    S.goto(BASE + '/app'); login(S, 'ผู้ขาย v6 (ทดสอบ)', '0871' + stamp)
     create_deal(S, 'ลำโพงบลูทูธ มือสอง (ทดสอบ v6)', 80)
     expect(S.locator('#limitNotes')).to_contain_text('ยอดดีลขั้นต่ำ 100 บาท')
     S.click('#createBtn'); wait_text(S, 'ยอดดีลขั้นต่ำ 100 บาท')
@@ -74,14 +74,14 @@ with sync_playwright() as p:
 
     print('5) หลังผู้ขายส่งของ ผู้ซื้อไม่มีปุ่มยกเลิก')
     code3 = api_deal(S, B, 900, ship=True)
-    B.goto(BASE + '/#/d/' + code3); wait_text(B, 'ยกเลิกดีลไม่ได้')
+    B.goto(BASE + '/app#/d/' + code3); wait_text(B, 'ยกเลิกดีลไม่ได้')
     assert B.locator('#buyerCancelBtn').count() == 0 and B.locator('text=ยกเลิกดีล (').count() == 0
     snap(B, '07-buyer-after-ship-no-cancel')
     B.evaluate(f"api('/deals/{code3}/confirm', {{}})")
 
     print('4) ผู้ขายยกเลิกหลังผู้ซื้อจ่าย → หน้ายืนยันแสดงค่าปรับ')
     code2 = api_deal(S, B, 2000)
-    S.goto(BASE + '/#/d/' + code2); S.wait_for_selector('#sellerCancelBtn')
+    S.goto(BASE + '/app#/d/' + code2); S.wait_for_selector('#sellerCancelBtn')
     expect(S.locator('#sellerCancelBtn')).to_contain_text('ค่าปรับ 60 ฿')
     S.click('#sellerCancelBtn'); expect(S.locator('#cancelBreak')).to_contain_text('2,030 ฿'); expect(S.locator('#cancelBreak')).to_contain_text('60 ฿')
     snap(S, '05-seller-cancel-sheet-penalty')
@@ -89,7 +89,7 @@ with sync_playwright() as p:
     snap(S, '06-seller-deal-penalty-note')
 
     print('6) หน้าเงินขายของฉัน: ยอดรวม − ค่าโอนออก − ค่าปรับ')
-    S.goto(BASE + '/#/me'); S.wait_for_selector('#payoutCard')
+    S.goto(BASE + '/app#/me'); S.wait_for_selector('#payoutCard')
     expect(S.locator('#payBreak')).to_contain_text('−30 ฿')        # 826.50 < 3,000 → ค่าโอนออก 30
     expect(S.locator('#payBreak')).to_contain_text('826.50 ฿')     # v13: ค่าปรับ 60 หักจากยอดรอโอนทันที 886.50 → 826.50
     expect(S.locator('#payBreak')).to_contain_text(RULE)
@@ -111,7 +111,7 @@ with sync_playwright() as p:
     snap(B, '10-terms-summary-box', el='.legal-sum')
 
     print('8) แอดมิน: ผู้ขายผิดซ้ำ 3 ครั้งใน 30 วัน → คำเตือน')
-    B.goto(BASE + '/#/'); B.wait_for_selector('#tabbar:not(.hidden)')
+    B.goto(BASE + '/app#/'); B.wait_for_selector('#tabbar:not(.hidden)')
     for pr in (500, 600):
         c = api_deal(S, B, pr); S.evaluate(f"api('/deals/{c}/cancel', {{}})")
     A.set_viewport_size({'width': 390, 'height': 844})

@@ -58,8 +58,8 @@ def scroll(pg, sel): pg.evaluate(f"document.querySelector('{sel}').scrollIntoVie
 with sync_playwright() as p:
     br = p.chromium.launch(headless=True)
     S = phone(br, 'seller'); B = phone(br, 'buyer')
-    S.goto(BASE + '/'); login(S, 'ร้านใหม่ v13', '090' + stamp + '1')
-    B.goto(BASE + '/'); login(B, 'ผู้ซื้อ v13', '091' + stamp + '2')
+    S.goto(BASE + '/app'); login(S, 'ร้านใหม่ v13', '090' + stamp + '1')
+    B.goto(BASE + '/app'); login(B, 'ผู้ซื้อ v13', '091' + stamp + '2')
 
     print('1) หน้าจ่าย: เลือกพร้อมเพย์ / บัตร (+ค่าธรรมเนียมบัตร)')
     code = post(S, '/deals', {'role': 'seller', 'title': 'หูฟังไร้สาย (ทดสอบ v13)', 'price': 1000, 'delivery': 'parcel', 'due_date': DUE, 'fee_payer': 'half'})['code']
@@ -86,19 +86,19 @@ with sync_playwright() as p:
     B.click('text=ไม่ยกเลิก')
 
     print('3) ร้านใหม่ (ขายสำเร็จ < 5 ดีล) สร้างดีลเกิน 3,000 ไม่ได้')
-    S.goto(BASE + '/#/create'); expect(S.locator('#fTitle')).to_be_visible()
+    S.goto(BASE + '/app#/create'); expect(S.locator('#fTitle')).to_be_visible()
     S.fill('#fTitle', 'กล้องมือสอง (ทดสอบ v13)'); S.fill('#price', '3500')
     expect(S.locator('#newSellerLimit')).to_contain_text('ร้านใหม่ (ขายสำเร็จยังไม่ครบ 5 ดีล) สร้างดีลได้สูงสุด 3,000 บาท/ดีล')
     scroll(S, '#limitNotes'); shot(S, '05-new-seller-3000-limit')
 
     print('4) ค้างค่าปรับ → ระงับสร้างดีล/โอนออก')
     S.goto(BASE + f'/#/d/{code}'); S.click('#sellerCancelBtn'); S.click('#cxBtn'); S.wait_for_timeout(800)
-    S.goto(BASE + '/#/create'); expect(S.locator('#fTitle')).to_be_visible(); S.fill('#price', '500')
+    S.goto(BASE + '/app#/create'); expect(S.locator('#fTitle')).to_be_visible(); S.fill('#price', '500')
     expect(S.locator('#penaltyBlock')).to_contain_text('ค่าปรับค้างชำระ')
     scroll(S, '#limitNotes'); shot(S, '06-blocked-by-penalty-create')
     S.fill('#fTitle', 'ของทดสอบ'); S.click('#createBtn'); wait_text(S, 'ต้องชำระให้ครบก่อน')
     shot(S, '06b-blocked-by-penalty-error')
-    S.goto(BASE + '/#/me'); S.wait_for_selector('#payPenaltyBtn')
+    S.goto(BASE + '/app#/me'); S.wait_for_selector('#payPenaltyBtn')
     scroll(S, '#penaltyBox'); shot(S, '07-blocked-by-penalty-payouts')
     S.click('#payPenaltyBtn'); S.wait_for_timeout(800)
     assert S.locator('#payPenaltyBtn').count() == 0

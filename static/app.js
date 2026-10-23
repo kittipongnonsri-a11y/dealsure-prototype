@@ -1993,14 +1993,16 @@ setInterval(async () => {
 /* ---------------- boot ---------------- */
 (async function boot() {
   const m = location.pathname.match(/^\/(d|s)\/([A-Za-z0-9-]+)/);
-  if (m) history.replaceState(null, '', '/#/' + (m[1] === 'd' ? 'd/' + m[2].toUpperCase() : 'shop/' + m[2]));
+  if (m) history.replaceState(null, '', '/app#/' + (m[1] === 'd' ? 'd/' + m[2].toUpperCase() : 'shop/' + m[2]));
   try { await loadMe(); } catch (e) { /* offline */ }
   const sp = new URLSearchParams(location.search).get('stripe_session');
   if (sp) {  // กลับจาก Stripe Checkout: ให้เซิร์ฟเวอร์ดึง session จาก Stripe มาตรวจเอง
     const code = (location.hash.match(/#\/d\/([A-Z0-9-]+)/) || [])[1];
-    history.replaceState(null, '', '/' + location.hash);
+    history.replaceState(null, '', '/app' + location.hash);
     if (code) try { const r = await api(`/deals/${code}/stripe-confirm`, {session_id: sp}); toast(r.ok ? 'ชำระเงินด้วยบัตรทดสอบ Stripe สำเร็จ เงินถูกพักไว้แล้ว' : 'Stripe ยังไม่ยืนยันการจ่าย ลองรีเฟรชอีกครั้ง'); } catch (e) { handleErr(e); }
   }
   window.addEventListener('hashchange', () => { navDepth++; render(); });
   render();
 })();
+
+if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));

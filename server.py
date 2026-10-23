@@ -917,6 +917,17 @@ def api_avatar(req, me, b):
     return {'ok': True, 'avatar': files[0]}
 
 
+# v15: สถิติจริงจากฐานข้อมูลเท่านั้น (ไม่นับข้อมูลเดโม) – หน้าแรกซ่อนส่วนนี้จนกว่าดีลสำเร็จถึงเกณฑ์
+STATS_MIN_COMPLETED = int(os.environ.get('DEALSURE_STATS_MIN', '50'))
+
+@route('GET', r'/api/stats', auth=False)
+def api_stats(h, me, b):
+    u = q1('SELECT COUNT(*) n FROM users WHERE COALESCE(is_demo,0)=0')
+    d = q1("SELECT COUNT(*) n, COALESCE(SUM(price),0) amt FROM deals WHERE status='completed' AND COALESCE(is_demo,0)=0")
+    return {'users': u['n'], 'completed_deals': d['n'], 'completed_amount': round(d['amt'] or 0),
+            'show': d['n'] >= STATS_MIN_COMPLETED, 'min_completed': STATS_MIN_COMPLETED, 'at': int(time.time())}
+
+
 @route('GET', r'/api/users/(\d+)', auth=False)
 def api_user(req, me, b, uid):
     u = get_user(int(uid))
@@ -1188,7 +1199,7 @@ def api_stripe_checkout(req, me, b, code):
         'adaptive_pricing[enabled]': 'false',  # ให้จ่ายเป็นบาทเสมอ (ยอดต้องตรงกับดีล)
         'excluded_payment_method_types[0]': 'promptpay',  # ทางบัตรเท่านั้น (พร้อมเพย์ใช้ทางจำลองที่ไม่มีค่าธรรมเนียมบัตร)
         'metadata[deal]': code, 'metadata[card_fee]': f'{cf:.2f}', 'payment_intent_data[metadata][deal]': code,
-        'success_url': f'{o}/?stripe_session={{CHECKOUT_SESSION_ID}}#/d/{code}', 'cancel_url': f'{o}/#/d/{code}'})
+        'success_url': f'{o}/app?stripe_session={{CHECKOUT_SESSION_ID}}#/d/{code}', 'cancel_url': f'{o}/app#/d/{code}'})
     ex('UPDATE deals SET stripe_session=? WHERE id=?', (sess['id'], d['id']))
     return {'ok': True, 'url': sess['url'], 'session_id': sess['id'], 'amount': total}
 
@@ -2158,8 +2169,14 @@ class H(BaseHTTPRequestHandler):
             self.send(500, {'error': 'ระบบขัดข้อง ลองใหม่อีกครั้ง'})
 
     def static(self, path):
-        if path in ('/', '/index.html') or path.startswith('/d/') or path.startswith('/s/'):
+        if path in ('/', '/landing', '/landing/'):
+            return self.page('landing.html')
+        if path in ('/app', '/app/', '/index.html') or path.startswith('/d/') or path.startswith('/s/'):
             return self.page('index.html')
+        if path == '/manifest.json':
+            return self.file(os.path.join(STATIC, 'manifest.json'), 'application/manifest+json')
+        if path == '/sw.js':
+            return self.file(os.path.join(STATIC, 'sw.js'), None, {'Service-Worker-Allowed': '/'})
         lk = LEGAL_PAGES.get(path.rstrip('/') or '/')
         if lk:
             return self.send(200, render_legal(lk), 'text/html; charset=utf-8', {'Cache-Control': 'no-cache'})
@@ -2180,10 +2197,10 @@ class H(BaseHTTPRequestHandler):
         html = open(os.path.join(STATIC, name), encoding='utf-8').read().replace('<!--SPRITE-->', SPRITE)
         self.send(200, html, 'text/html; charset=utf-8')
 
-    def file(self, fp):
+    def file(self, fp, ctype=None, hdrs=None):
         if not os.path.isfile(fp): return self.send(404, 'not found', 'text/plain')
         ext = os.path.splitext(fp)[1].lower()
-        ctype = CT.get(ext, 'application/octet-stream')
+        ctype = ctype or CT.get(ext, 'application/octet-stream')
         size = os.path.getsize(fp)
         rng = self.headers.get('Range')
         with open(fp, 'rb') as f:
@@ -2198,7 +2215,7 @@ class H(BaseHTTPRequestHandler):
                 f.seek(start); data = f.read(end - start + 1)
                 return self.send(206, data, ctype, {'Content-Range': f'bytes {start}-{end}/{size}', 'Accept-Ranges': 'bytes'})
             data = f.read()
-        self.send(200, data, ctype, {'Accept-Ranges': 'bytes'})
+        self.send(200, data, ctype, {'Accept-Ranges': 'bytes', **(hdrs or {})})
 
 
 def ticker():

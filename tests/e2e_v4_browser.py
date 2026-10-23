@@ -45,8 +45,8 @@ with sync_playwright() as p:
     S = phone(br, 'ผู้ขาย'); B = phone(br, 'ผู้ซื้อ')
 
     print('1) ผู้ขายใส่ช่องทางโซเชียลในหน้าบัญชี (ตรวจรูปแบบ + บอกช่องที่ผิด)')
-    S.goto(BASE + '/'); login(S, 'ร้านน้องโซ (ทดสอบ)', '0871' + stamp)
-    S.goto(BASE + '/#/me'); S.wait_for_selector('#socCard'); thai_fonts(S, 'หน้าบัญชี')
+    S.goto(BASE + '/app'); login(S, 'ร้านน้องโซ (ทดสอบ)', '0871' + stamp)
+    S.goto(BASE + '/app#/me'); S.wait_for_selector('#socCard'); thai_fonts(S, 'หน้าบัญชี')
     S.fill('#so-facebook', 'https://m.facebook.com/nongso.shop?ref=bookmarks')
     S.fill('#so-line', '@NongSoShop'); S.fill('#so-instagram', 'bad handle!'); S.fill('#so-tiktok', 'https://www.tiktok.com/@nongso.shop?lang=th')
     S.fill('#so-youtube', '@NongSoChannel'); S.fill('#so-website', 'nongso.example.com'); S.fill('#so-phone', '+66 81 234 5678')
@@ -118,7 +118,7 @@ with sync_playwright() as p:
     assert B.locator('#rvList .rev .kt', has_text='สินค้า').count() == B.locator('#rvList .rev').count() > 0
 
     print('7) ผู้ซื้อรีวิวพร้อมแนบรูป (สูงสุด 3 รูป)')
-    B.goto(BASE + '/#/login'); login(B, 'คุณรีวิว (ทดสอบ)', '0872' + stamp)
+    B.goto(BASE + '/app#/login'); login(B, 'คุณรีวิว (ทดสอบ)', '0872' + stamp)
     due = time.strftime('%Y-%m-%d', time.localtime(time.time() + 3 * 86400))
     code = S.evaluate(f"api('/deals', {{role:'seller', title:'กล้องฟิล์มทดสอบรีวิว (ทดสอบ)', price:1500, delivery:'parcel', due_date:'{due}', fee_payer:'half', photos:[]}}).then(r => r.code)")
     B.evaluate(f"(async () => {{ await api('/deals/{code}/accept', {{}}); await api('/deals/{code}/pay', {{}}); }})()")

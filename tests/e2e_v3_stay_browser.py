@@ -45,7 +45,7 @@ def pay(pg):
 
 def fill_stay(pg, title, price, cin=3, nights=2, role='seller', photo=None, host='พี่โฮสต์ (ทดสอบ)', addr='88/8 ม.2 ต.ห้วยทราย อ.แม่ริม จ.เชียงใหม่',
               map_url='https://maps.app.goo.gl/TestStay123'):
-    pg.goto(BASE + '/#/'); pg.click('#stayCta'); expect(pg.locator('#sAddr')).to_be_visible()
+    pg.goto(BASE + '/app#/'); pg.click('#stayCta'); expect(pg.locator('#sAddr')).to_be_visible()
     expect(pg.locator('#kindSeg [data-v=stay]')).to_have_class(re.compile('on'))
     pg.click(f'#roleSeg [data-v={role}]')
     pg.fill('#fTitle', title); pg.fill('#sAddr', addr); pg.fill('#sMap', map_url)
@@ -62,7 +62,7 @@ with sync_playwright() as p:
     H = phone(br, 'เจ้าของที่พัก'); G = phone(br, 'ผู้เข้าพัก')
 
     print('1) เจ้าของที่พักสร้างดีลที่พัก (ประเภท "ที่พัก")')
-    H.goto(BASE + '/'); login(H, 'พี่โฮสต์ (ทดสอบ)', '0891' + stamp)
+    H.goto(BASE + '/app'); login(H, 'พี่โฮสต์ (ทดสอบ)', '0891' + stamp)
     wait_text(H, 'ดีลที่พัก'); thai_fonts(H, 'หน้าแรก')
     fill_stay(H, 'บ้านพักริมน้ำ ห้องวิวสวน (ทดสอบ)', 2400, cin=6, photo=HOUSE)
     H.fill('#fDesc', 'ห้องนอน 1 ห้อง · อาหารเช้า 2 ที่ · ที่จอดรถ')
@@ -144,7 +144,7 @@ with sync_playwright() as p:
     shot(G, '12-guest-refunded')
 
     print('8) จองที่พักจากหน้าร้านตัวอย่าง (บ้านพักริมดอย) → ยกเลิกฟรีได้')
-    G.goto(BASE + '/#/'); wait_text(G, 'ร้านแนะนำ')
+    G.goto(BASE + '/app#/'); wait_text(G, 'ร้านแนะนำ')
     sid = G.evaluate("fetch('/api/shops').then(r=>r.json()).then(j=>j.shops.find(s=>s.name==='พี่ปุ้ย (ตัวอย่าง)').id)")
     G.goto(BASE + f'/#/shop/{sid}'); wait_text(G, 'จองแบบปลอดภัย'); expect(G.locator('.shophead')).to_contain_text('เข้าพักสำเร็จ')
     shot(G, '13-demo-host-storefront', full=True)
@@ -162,7 +162,7 @@ with sync_playwright() as p:
     link4 = submit_deal(H); code4 = link4.rsplit('/', 1)[1]
     G.goto(link4); G.click('text=รับดีล แล้วไปจ่ายเงิน'); wait_text(G, 'PromptPay'); pay(G)
     G.click('#skipRelease'); wait_text(G, 'เช็คอินสำเร็จ · ปล่อยเงินให้เจ้าของที่พักแล้ว'); wait_text(G, 'ระบบปล่อยเงินอัตโนมัติ (24 ชม. หลังเวลาเช็คอิน)')
-    H.goto(BASE + '/#/'); wait_text(H, 'ดีลที่จบแล้ว')
+    H.goto(BASE + '/app#/'); wait_text(H, 'ดีลที่จบแล้ว')
     shot(H, '16-host-home-deal-cards')
     print('   Thai fonts OK:', thai_fonts(H, 'หน้าแรกเจ้าของ'))
     br.close()

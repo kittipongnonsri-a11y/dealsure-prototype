@@ -37,8 +37,8 @@ with sync_playwright() as p:
     S = phone(br, 'ผู้ขาย'); B = phone(br, 'ผู้ซื้อ')
 
     print('1) ผู้ขายเปลี่ยนรูปโปรไฟล์ (ครอปเป็นสี่เหลี่ยมจัตุรัส)')
-    S.goto(BASE + '/'); login(S, 'น้องฝ้าย (ทดสอบ)', '0871' + stamp)
-    S.goto(BASE + '/#/me'); wait_text(S, 'บัญชีของฉัน')
+    S.goto(BASE + '/app'); login(S, 'น้องฝ้าย (ทดสอบ)', '0871' + stamp)
+    S.goto(BASE + '/app#/me'); wait_text(S, 'บัญชีของฉัน')
     upload(S, '#avEdit', os.path.join(HERE, 'camera.jpg'))
     expect(S.locator('#cropCv')).to_be_visible()
     S.fill('#cropZoom', '1.6'); S.dispatch_event('#cropZoom', 'input')
@@ -71,7 +71,7 @@ with sync_playwright() as p:
     B.locator('#chatCard').scroll_into_view_if_needed(); shot(B, '03-deal-chat-buyer')
 
     print('4) ผู้ขาย: การ์ด "ดีลล่าสุด" แบบใหม่ (360 / 390 px) + แชทยังไม่อ่าน')
-    S.goto(BASE + '/#/'); wait_text(S, 'ดีลล่าสุด')
+    S.goto(BASE + '/app#/'); wait_text(S, 'ดีลล่าสุด')
     S.wait_for_selector('.dcard .dc-chat')
     expect(S.locator('#chatBadge')).to_be_visible()
     hs = S.evaluate("[...document.querySelectorAll('.dc-title')].map(e => Math.round(e.getBoundingClientRect().height))")
@@ -102,17 +102,17 @@ with sync_playwright() as p:
     print('6) ผู้ซื้อ: ข้อความใหม่เด้งเข้าแชทในหน้าดีล (polling) + รายการแชท')
     B.wait_for_selector(f'#msgs-{tid} .msg:not(.me)', timeout=12000)
     B.wait_for_selector(f'#msgs-{tid} .mwarn', timeout=12000)
-    B.goto(BASE + '/#/chats'); B.wait_for_selector('.chatlist .ci')
+    B.goto(BASE + '/app#/chats'); B.wait_for_selector('.chatlist .ci')
 
     print('7) ทักร้านก่อนซื้อ (ร้านตัวอย่าง)')
-    B.goto(BASE + '/#/'); wait_text(B, 'ร้านแนะนำ'); B.click('.shoprow >> nth=0'); wait_text(B, 'คะแนนความน่าเชื่อถือ')
+    B.goto(BASE + '/app#/'); wait_text(B, 'ร้านแนะนำ'); B.click('.shoprow >> nth=0'); wait_text(B, 'คะแนนความน่าเชื่อถือ')
     expect(B.locator('#chatShopBtn')).to_be_visible(); shot(B, '09-shop-chat-button')
     B.click('#chatShopBtn'); B.wait_for_selector('.chat.full')
     expect(B.locator('.chat-safe')).to_be_visible()
     stid = B.evaluate("+document.querySelector('[data-thread]').dataset.thread")
     B.fill(f'#cin-{stid}', 'สวัสดีค่ะ กล้องตัวนี้ยังมีไหมคะ ขอดูรูปเพิ่มได้ไหม'); B.click(f'#csend-{stid}'); B.wait_for_selector(f'#msgs-{stid} .msg.me')
     shot(B, '10-shop-chat-before-buying')
-    B.goto(BASE + '/#/chats'); B.wait_for_selector('.chatlist .ci >> nth=1'); shot(B, '08-chat-list')
+    B.goto(BASE + '/app#/chats'); B.wait_for_selector('.chatlist .ci >> nth=1'); shot(B, '08-chat-list')
 
     print('8) ข้อพิพาท → แอดมินส่งข้อความถึงทั้งสองฝ่าย')
     S.goto(BASE + f'/#/d/{code}'); S.click('button:has-text("กรอกเลขพัสดุ")'); S.fill('#trk', 'TH0000CHAT01'); S.click('#shipBtn'); wait_text(S, 'กำลังจัดส่ง')
@@ -151,14 +151,14 @@ with sync_playwright() as p:
 
     print('10) รูปโปรไฟล์แสดงในหน้าร้าน + แชท + การ์ดดีลของผู้ซื้อ')
     B.goto(BASE + f'/#/shop/{S.evaluate("S.me.id")}'); B.wait_for_selector('.shophead .avatar.has-img'); shot(B, '16-shop-page-avatar')
-    B.goto(BASE + '/#/'); B.wait_for_selector('.dcard .avatar.has-img'); B.locator('.sec-h').first.scroll_into_view_if_needed(); B.evaluate('window.scrollBy(0,-12)'); shot(B, '17-buyer-home-cards-avatar')
+    B.goto(BASE + '/app#/'); B.wait_for_selector('.dcard .avatar.has-img'); B.locator('.sec-h').first.scroll_into_view_if_needed(); B.evaluate('window.scrollBy(0,-12)'); shot(B, '17-buyer-home-cards-avatar')
     no_hscroll(B, 'หน้าแรกผู้ซื้อ')
 
     print('11) รายการยาว: แสดง 5 รายการล่าสุด + ปุ่ม "ดูเพิ่ม"')
     for i in range(7):   # สร้างแล้วยกเลิก 7 ดีล → ไปอยู่ "ดีลที่จบแล้ว"
         S.evaluate(f"""(async () => {{ const r = await api('/deals', {{role:'seller', title:'ของทดสอบดูเพิ่ม {i + 1} (ทดสอบ)', price:{300 + i * 10}, delivery:'parcel', due_date:todayStr(3), fee_payer:'half'}});
                        await api('/deals/' + r.code + '/cancel', {{}}); }})()""")
-    S.goto(BASE + '/#/'); S.reload(); S.wait_for_selector('#pl-done .more-btn')
+    S.goto(BASE + '/app#/'); S.reload(); S.wait_for_selector('#pl-done .more-btn')
     n0 = S.locator('#pl-done .dcard').count(); total = 7
     if n0 != 5: errors.append(f'ดีลที่จบแล้ว ควรแสดง 5 รายการแรก ได้ {n0}')
     S.evaluate("document.querySelector('#pl-done .more-btn').scrollIntoView({block:'center'})")

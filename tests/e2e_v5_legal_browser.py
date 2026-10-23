@@ -33,7 +33,7 @@ with sync_playwright() as p:
     U = phone(br, 'ผู้ใช้')
 
     print('1) หน้าเข้าสู่ระบบมีข้อความยอมรับข้อตกลง + ลิงก์')
-    U.goto(BASE + '/#/login'); U.wait_for_selector('#legalConsent'); fonts_ok(U, 'login')
+    U.goto(BASE + '/app#/login'); U.wait_for_selector('#legalConsent'); fonts_ok(U, 'login')
     expect(U.locator('#legalConsent')).to_contain_text('การเข้าใช้งานถือว่าคุณยอมรับ')
     U.evaluate("document.querySelector('#legalConsent').scrollIntoView({block:'center'})"); snap(U, '01-login-consent-links')
 
@@ -57,9 +57,9 @@ with sync_playwright() as p:
 
     if '--no-login' not in sys.argv:
         print('4) หน้าบัญชีมีการ์ด “ข้อตกลงและนโยบาย” + ลิงก์ท้ายหน้า')
-        U.goto(BASE + '/#/login'); login(U, 'ผู้ทดสอบเอกสาร', '0861' + stamp)
+        U.goto(BASE + '/app#/login'); login(U, 'ผู้ทดสอบเอกสาร', '0861' + stamp)
         expect(U.locator('.footer-note .legal-mini').first).to_be_visible()
-        U.wait_for_timeout(2500); U.goto(BASE + '/#/me'); U.wait_for_selector('#legalCard')
+        U.wait_for_timeout(2500); U.goto(BASE + '/app#/me'); U.wait_for_selector('#legalCard')
         U.evaluate("document.querySelector('#legalCard').scrollIntoView({block:'center'})"); snap(U, '09-account-legal-card')
         U.click('#legalCard a[href="/privacy"]'); U.wait_for_url(re.compile(r'/privacy$')); U.wait_for_selector('.legal-sum')
         U.click('.top .icon-btn[aria-label="ย้อนกลับ"]'); U.wait_for_selector('#legalCard')  # ย้อนกลับมาหน้าบัญชีเดิม

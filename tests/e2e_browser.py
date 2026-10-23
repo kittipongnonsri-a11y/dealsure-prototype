@@ -62,7 +62,7 @@ def upload(pg, click_sel, path):
 
 
 def create_deal(pg, title, price, delivery='parcel', fee='half', photo=None, role='seller'):
-    pg.goto(BASE + '/#/create'); expect(pg.locator('#fTitle')).to_be_visible()
+    pg.goto(BASE + '/app#/create'); expect(pg.locator('#fTitle')).to_be_visible()
     pg.click(f'#roleSeg [data-v={role}]')
     pg.fill('#fTitle', title); pg.fill('#price', str(price))
     pg.click(f'#delivChips [data-v={delivery}]'); pg.click(f'#feeSeg [data-v={fee}]')
@@ -85,7 +85,7 @@ with sync_playwright() as p:
     S = phone(br, 'ผู้ขาย'); B = phone(br, 'ผู้ซื้อ')
 
     print('1) ผู้ขายล็อกอิน (OTP แสดงบนจอ)')
-    S.goto(BASE + '/'); login(S, 'น้องฝ้าย (ทดสอบ)', '0861' + stamp, first_shots=True)
+    S.goto(BASE + '/app'); login(S, 'น้องฝ้าย (ทดสอบ)', '0861' + stamp, first_shots=True)
     wait_text(S, 'ดีลล่าสุด'); shot(S, '03-home')
 
     print('2) ผู้ขายสร้างดีลส่งพัสดุ + รูป → ได้ลิงก์')
@@ -171,7 +171,7 @@ with sync_playwright() as p:
     B.click('text=ขอเงินคืน (ส่งช้าเกินกำหนด)'); wait_text(B, 'คืนเงินให้ผู้ซื้อแล้ว')
 
     print('10) หน้าร้านตัวอย่าง (Gold) → ซื้อแบบปลอดภัย')
-    B.goto(BASE + '/#/'); wait_text(B, 'ร้านแนะนำ'); shot(B, '25-buyer-home-deals', full=True)
+    B.goto(BASE + '/app#/'); wait_text(B, 'ร้านแนะนำ'); shot(B, '25-buyer-home-deals', full=True)
     B.click('.shoprow >> nth=0'); wait_text(B, 'คะแนนความน่าเชื่อถือ'); shot(B, '26-shop-gold', full=True)
     B.click('#seeAllGoods'); wait_text(B, 'สินค้าขายประจำทั้งหมด'); wait_text(B, 'แผ่นเสียง'); shot(B, '26b-shop-products-all', full=True)
     B.click('.pcard:has-text("แผ่นเสียง") >> text=ซื้อแบบปลอดภัย'); B.click('#buyChips [data-v=messenger]'); shot(B, '27-shop-buy-sheet')
@@ -189,10 +189,10 @@ with sync_playwright() as p:
     S.click('#roleSeg [data-v=seller]'); S.fill('#price', '6000'); wait_text(S, 'วงเงินของร้านระดับ Bronze คือ 5,000'); S.locator('#limitNotes').scroll_into_view_if_needed(); shot(S, '31-new-user-limit-5000')
 
     print('12) โปรไฟล์ / บัญชี / ร้านของฉัน')
-    B.goto(BASE + '/#/me'); wait_text(B, 'บัญชีของฉัน')
-    S.goto(BASE + '/#/me'); wait_text(S, 'เงินขายของฉัน'); shot(S, '32-seller-account-payouts', full=True)
+    B.goto(BASE + '/app#/me'); wait_text(B, 'บัญชีของฉัน')
+    S.goto(BASE + '/app#/me'); wait_text(S, 'เงินขายของฉัน'); shot(S, '32-seller-account-payouts', full=True)
     uid = S.evaluate('S.me.id'); B.goto(BASE + f'/#/u/{uid}'); wait_text(B, 'ประวัติดีล'); shot(B, '33-seller-public-profile', full=True)
-    S.goto(BASE + '/#/myshop'); wait_text(S, 'เพิ่มสินค้าขายประจำ'); S.click('text=เพิ่มสินค้าขายประจำ')
+    S.goto(BASE + '/app#/myshop'); wait_text(S, 'เพิ่มสินค้าขายประจำ'); S.click('text=เพิ่มสินค้าขายประจำ')
     S.fill('#pTitle', 'กระเป๋ากล้องหนัง (ทดสอบ)'); S.fill('#pPrice', '890'); upload(S, '#pPh .ph.add', os.path.join(HERE, 'camera.jpg')); S.wait_for_selector('#pPh img')
     S.click('#pDl [data-v=meet]'); S.click('#pBtn'); wait_text(S, 'กระเป๋ากล้องหนัง (ทดสอบ)'); shot(S, '34-my-shop-new', full=True)
     B.click('.top .icon-btn[aria-label="การแจ้งเตือน"]'); wait_text(B, 'การแจ้งเตือน'); B.wait_for_timeout(500); shot(B, '35-buyer-notifications')

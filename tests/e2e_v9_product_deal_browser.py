@@ -50,10 +50,10 @@ with sync_playwright() as p:
     S = phone(br, 'seller'); B = phone(br, 'buyer')
 
     print('1) เข้าสู่ระบบร้านทองตัวอย่าง → สร้างดีล เห็นตัวเลือกสินค้าขายประจำ')
-    S.goto(BASE + '/')
+    S.goto(BASE + '/app')
     login(S, 'ป้าแดง (ทดสอบ v9)', '0800000001')
     wait_text(S, 'ดีลล่าสุด')
-    S.goto(BASE + '/#/create')
+    S.goto(BASE + '/app#/create')
     wait_text(S, 'เลือกจากสินค้าขายประจำ')
     expect(S.locator('#tplPick')).to_be_visible()
     expect(S.locator('#tplRow .tpl-card').first).to_be_visible()
@@ -73,7 +73,7 @@ with sync_playwright() as p:
     shot(S, '02b-prefilled-full', full=True)
 
     print('3) สร้างดีลจากหน้าร้าน (ปุ่ม สร้างดีลจากสินค้านี้)')
-    S.goto(BASE + '/#/myshop')
+    S.goto(BASE + '/app#/myshop')
     wait_text(S, 'สินค้าขายประจำ')
     expect(S.locator('button:has-text("สร้างดีลจากสินค้านี้")').first).to_be_visible()
     shot(S, '03-shop-create-from-product')
@@ -83,7 +83,7 @@ with sync_playwright() as p:
     shot(S, '03b-from-shop-prefilled')
 
     print('4) ที่พักให้จอง — หน้าร้านพี่ปุ้ย')
-    B.goto(BASE + '/')
+    B.goto(BASE + '/app')
     login(B, 'ผู้เข้าพัก v9', '0899' + stamp)
     sid = B.evaluate("fetch('/api/shops').then(r=>r.json()).then(j=>j.shops.find(s=>s.name==='พี่ปุ้ย (ตัวอย่าง)'|| (s.shop_name||'').includes('บ้านพักริมดอย')).id)")
     # find host by phone via shops list
@@ -103,9 +103,9 @@ with sync_playwright() as p:
 
     print('5) เจ้าของที่พักเห็นปุ่มเพิ่มที่พักให้จอง')
     H = phone(br, 'host')
-    H.goto(BASE + '/')
+    H.goto(BASE + '/app')
     login(H, 'พี่ปุ้ย (ทดสอบ)', '0800000003')
-    H.goto(BASE + '/#/myshop')
+    H.goto(BASE + '/app#/myshop')
     wait_text(H, 'เพิ่มที่พักให้จอง')
     expect(H.locator('#addStayBtn')).to_contain_text('เพิ่มที่พักให้จอง')
     shot(H, '05-owner-add-stay-renamed')
