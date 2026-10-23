@@ -727,3 +727,19 @@ label.chk.save-as input{margin-top:3px;flex:none;width:18px;height:18px}
 .paym button{position:relative;text-align:left;border:1.5px solid var(--line);background:#fff;border-radius:14px;padding:10px 12px;font:inherit;color:inherit;display:flex;flex-direction:column;gap:2px}
 .paym button.on{border-color:var(--tq);background:#E9F8F6;box-shadow:0 0 0 2px rgba(20,170,160,.15)}
 .paym small{color:var(--muted);font-size:12px}.paym .rec{position:absolute;top:-8px;right:8px;background:var(--tq);color:#fff;font-size:11px;padding:1px 8px;border-radius:99px}
+
+/* v15.1: ปุ่มทองแบบหน้าแรก + การ์ดดีลแบบกะทัดรัด */
+.btn.gold{background:linear-gradient(180deg,#FFD66B,#F5B833);color:#13312E;font-weight:700;box-shadow:0 8px 20px rgba(200,150,46,.35),inset 0 -2px 0 rgba(0,0,0,.12)}
+.btn.gold svg{background:#13312E;color:#FFD66B;border-radius:50%;padding:3px}
+.dcards{gap:8px}
+.dcard.dc-c{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:16px;min-height:68px;box-shadow:0 3px 12px rgba(20,90,80,.07)}
+.dc-c .thumb{width:44px;height:44px;border-radius:12px;flex:none}
+.dc-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.dc-l1,.dc-l2{display:flex;align-items:center;gap:8px;min-width:0}
+.dc-c .dc-title{flex:1;min-width:0;font-size:14.5px;line-height:1.35;-webkit-line-clamp:2}
+#pl-done .dc-title{-webkit-line-clamp:1;white-space:nowrap;text-overflow:ellipsis;display:block}
+.dc-c .dc-l1{align-items:flex-start}
+.dc-c .dc-price{font-size:15px;white-space:nowrap;flex:none}
+.dc-l2 .spill{white-space:nowrap;flex:none;font-size:11.5px;padding:1px 8px}
+.dc-meta{flex:1;min-width:0;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dc-meta .avatar{width:16px!important;height:16px!important;font-size:9px!important;display:inline-grid!important;vertical-align:-3px;margin-right:3px}

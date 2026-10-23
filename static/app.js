@@ -374,18 +374,12 @@ async function logout() { await api('/logout', {}); S.me = null; S.unread = 0; l
 async function vHome() {
   const [r, sh] = await Promise.all([api('/deals'), api('/shops'), pollCounts()]);
   const act = r.deals.filter(d => ACTIVE.includes(d.status)), done = r.deals.filter(d => !ACTIVE.includes(d.status));
-  const row = d => `<a class="dcard" href="#/d/${esc(d.code)}">
-     <div class="dc-head">${thumb(d.photo, 'thumb', isStay(d) ? 'home' : 'box')}
-       <div class="grow"><div class="dc-title">${esc(d.title)}</div>
-         <div class="dc-role">คุณเป็น${RL(d.role, isStay(d))} · ${isStay(d) ? '🏠 เช็คอิน ' + (d.checkin_at ? dTime(d.checkin_at) : '') : dlvLabel(d.delivery)}</div></div>
-       ${d.chat_unread ? `<span class="dc-chat" aria-label="ข้อความใหม่ ${d.chat_unread}">${ic('chat', 15)}${d.chat_unread > 9 ? '9+' : d.chat_unread}</span>` : ''}</div>
-     <div class="dc-rows">
-       <div class="dc-row"><span class="k">ราคา</span><span class="dc-price">${baht(d.price)}</span></div>
-       <div class="dc-row"><span class="k">สถานะ</span>${stLabel(d.status, d.role, d.kind)}</div>
-       <div class="dc-row"><span class="k">${RL(d.role === 'seller' ? 'buyer' : 'seller', isStay(d))}</span>${d.other
-         ? `<span class="dc-who">${avatar({name: d.other, initial: d.other_initial, avatar: d.other_avatar}, 'xs', false)}<span>${esc(d.other)}</span></span>`
-         : '<span class="muted">รออีกฝ่ายกดรับดีล</span>'}</div>
-       <div class="dc-row"><span class="k">อัปเดต</span><span>${dShort(d.updated_at || d.created_at)}</span></div>
+  const row = d => `<a class="dcard dc-c" href="#/d/${esc(d.code)}">
+     ${thumb(d.photo, 'thumb', isStay(d) ? 'home' : 'box')}
+     <div class="dc-main">
+       <div class="dc-l1"><span class="dc-title">${esc(d.title)}</span><span class="dc-price">${baht(d.price)}</span></div>
+       <div class="dc-l2">${stLabel(d.status, d.role, d.kind)}<span class="dc-meta">${RL(d.role === 'seller' ? 'buyer' : 'seller', isStay(d))}: ${d.other ? avatar({name: d.other, initial: d.other_initial, avatar: d.other_avatar}, 'xs', false) + esc(d.other) : 'รอกดรับดีล'} · ${dShort(d.updated_at || d.created_at)}</span>
+       ${d.chat_unread ? `<span class="dc-chat" aria-label="ข้อความใหม่ ${d.chat_unread}">${ic('chat', 13)}${d.chat_unread > 9 ? '9+' : d.chat_unread}</span>` : ''}</div>
      </div></a>`;
   const shops = sh.shops.slice(0, 3).map(s => `<div class="shoprow" onclick="location.hash='#/shop/${s.id}'">${avatar(s, 'sm')}
      <div class="grow"><b class="prompt ell" style="display:block">${esc(s.shop_name)}</b>
@@ -394,12 +388,12 @@ async function vHome() {
   $('#view').innerHTML = header({title: 'สวัสดี ' + esc(hello(S.me.name)), sub: 'เงินถูกพักไว้จนกว่าผู้ซื้อจะได้ของ ปลอดภัยทั้งสองฝ่าย',
       hero: `<a href="#/me" style="text-decoration:none">${hero('wallet', 'var(--tq)', 'เงินขาย รอโอนรอบถัดไป (วันละครั้ง)', baht(r.pending_payout), '<span class="badge b-green">จำลอง</span>')}</a>`}) + `
     <div class="wrap">
-      <a class="btn primary" href="#/create" onclick="if(S.F&&S.F.kind==='stay')S.F.kind='goods'">${ic('plus', 20)}สร้างดีลใหม่ & ส่งลิงก์</a>
+      <a class="btn gold" href="#/create" onclick="if(S.F&&S.F.kind==='stay')S.F.kind='goods'">${ic('plus', 20)}สร้างดีลใหม่ & ส่งลิงก์</a>
       <button class="stay-cta mt12" id="stayCta" onclick="startStay()">${ic('home', 22)}<span class="grow"><b>ดีลที่พัก</b> · จองที่พักจากโพสต์ FB / LINE<br><span class="small">เงินพักไว้จนผู้เข้าพักเช็คอินได้จริง กันที่พักปลอม</span></span><span class="link">เริ่ม →</span></button>
       ${S.chatUnread ? `<a class="chat-cta mt12" href="#/chats">${ic('chat', 20)}<span class="grow">มีข้อความใหม่ ${S.chatUnread} ข้อความ</span><span class="link">เปิดแชท →</span></a>` : ''}
       <h3 class="sec-h">${ic('list', 18)}ดีลล่าสุด · กำลังดำเนินการ <span class="muted small">${act.length} ดีล</span></h3>
       ${act.length ? `<div class="dcards">${act.map(row).join('')}</div>` : `<div class="card"><div class="empty-st"><div class="big">🤝</div>ยังไม่มีดีล ลองสร้างดีลแล้วส่งลิงก์ให้อีกฝ่ายทาง LINE ดูสิ</div></div>`}
-      ${done.length ? `<h3 class="sec-h">${ic('check', 18)}ดีลที่จบแล้ว <span class="muted small">${done.length} ดีล</span></h3>${pagedList('done', done, row, 5, 'dcards')}` : ''}
+      ${done.length ? `<h3 class="sec-h">${ic('check', 18)}ดีลที่จบแล้ว <span class="muted small">${done.length} ดีล</span></h3>${pagedList('done', done, row, 10, 'dcards')}` : ''}
       ${shops ? `<div class="card"><h3>${ic('store', 18)}ร้านแนะนำ</h3>${shops}</div>` : ''}
       ${noteHtml('info', '<b>โหมดทดลอง – ไม่มีเงินจริง</b> การจ่ายเงิน การโอน และการยืนยันตัวตนทั้งหมดเป็นการจำลอง ใช้ปุ่ม “เร่งเวลา (ทดสอบ)” ในหน้าดีลเพื่อข้ามเวลารอได้')}
       <p class="footer-note">ดีลชัวร์ (DealSure) · ต้นแบบ${legalMini()}</p>

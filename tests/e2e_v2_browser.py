@@ -155,12 +155,12 @@ with sync_playwright() as p:
     no_hscroll(B, 'หน้าแรกผู้ซื้อ')
 
     print('11) รายการยาว: แสดง 5 รายการล่าสุด + ปุ่ม "ดูเพิ่ม"')
-    for i in range(7):   # สร้างแล้วยกเลิก 7 ดีล → ไปอยู่ "ดีลที่จบแล้ว"
+    for i in range(12):   # สร้างแล้วยกเลิก 7 ดีล → ไปอยู่ "ดีลที่จบแล้ว"
         S.evaluate(f"""(async () => {{ const r = await api('/deals', {{role:'seller', title:'ของทดสอบดูเพิ่ม {i + 1} (ทดสอบ)', price:{300 + i * 10}, delivery:'parcel', due_date:todayStr(3), fee_payer:'half'}});
                        await api('/deals/' + r.code + '/cancel', {{}}); }})()""")
     S.goto(BASE + '/app#/'); S.reload(); S.wait_for_selector('#pl-done .more-btn')
-    n0 = S.locator('#pl-done .dcard').count(); total = 7
-    if n0 != 5: errors.append(f'ดีลที่จบแล้ว ควรแสดง 5 รายการแรก ได้ {n0}')
+    n0 = S.locator('#pl-done .dcard').count(); total = 12
+    if n0 != 10: errors.append(f'ดีลที่จบแล้ว ควรแสดง 10 รายการแรก ได้ {n0}')
     S.evaluate("document.querySelector('#pl-done .more-btn').scrollIntoView({block:'center'})")
     shot(S, '18-finished-deals-show-more')
     S.click('#pl-done .more-btn'); S.wait_for_timeout(300)
