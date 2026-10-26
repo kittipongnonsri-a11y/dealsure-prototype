@@ -88,6 +88,10 @@ CREATE TABLE IF NOT EXISTS users(
   id_verified INTEGER DEFAULT 0, id_doc TEXT, id_verified_at REAL,
   shop_name TEXT, shop_bio TEXT, is_demo INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS otps(phone TEXT PRIMARY KEY, name TEXT, code TEXT, expires REAL, tries INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS avatars(user_id INTEGER PRIMARY KEY, mime TEXT, data BLOB, updated_at INTEGER);
+CREATE TABLE IF NOT EXISTS identities(provider TEXT, sub TEXT, user_id INTEGER, name TEXT, email TEXT, created_at REAL, PRIMARY KEY(provider, sub));
+CREATE TABLE IF NOT EXISTS oauth_states(state TEXT PRIMARY KEY, provider TEXT, mode TEXT, user_id INTEGER, created_at REAL);
+CREATE TABLE IF NOT EXISTS pending_social(token TEXT PRIMARY KEY, provider TEXT, sub TEXT, name TEXT, email TEXT, expires REAL);
 CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, user_id INTEGER, created_at REAL);
 CREATE TABLE IF NOT EXISTS admin_sessions(token TEXT PRIMARY KEY, created_at REAL);
 CREATE TABLE IF NOT EXISTS products(
@@ -824,18 +828,24 @@ def api_me(req, me, b):
     u['unread'] = q1('SELECT COUNT(*) n FROM notifications WHERE user_id=? AND read=0', (me['id'],))['n']
     u['chat_unread'] = chat_unread(me['id'])
     u['penalty_owed'] = penalty_owed(me['id'])
+    u['identities'] = identities_of(me['id'])
     return {'user': u}
 
 
 @route('POST', '/api/login/start', auth=False)
 def api_login_start(req, me, b):
+    """v15.3: เบอร์ที่มีบัญชีแล้ว → ไม่ต้องกรอกชื่อ (ใช้ชื่อเดิมเสมอ) · เบอร์ใหม่ → ต้องมีชื่อ (ถ้ามาจากโซเชียลใช้ชื่อจากโซเชียลได้)"""
     name = s_(b.get('name'), 60)
     phone = re.sub(r'\D', '', s_(b.get('phone'), 20))
-    if not name: raise ApiError('กรุณากรอกชื่อ')
     if not re.fullmatch(r'0\d{8,9}', phone): raise ApiError('เบอร์โทรไม่ถูกต้อง (ตัวอย่าง 0812345678)')
+    existing = bool(q1('SELECT 1 FROM users WHERE phone=?', (phone,)))
+    if not existing and not name:
+        ps = pending_social(req)
+        name = (ps['name'] if ps else '') or ''
+        if not name: return {'ok': False, 'need_name': True, 'phone': phone}
     code = f'{random.randint(0, 999999):06d}'
-    ex('INSERT OR REPLACE INTO otps(phone,name,code,expires,tries) VALUES(?,?,?,?,0)', (phone, name, code, now() + 600))
-    return {'ok': True, 'phone': phone, 'demo_code': code}
+    ex('INSERT OR REPLACE INTO otps(phone,name,code,expires,tries) VALUES(?,?,?,?,0)', (phone, None if existing else name, code, now() + 600))
+    return {'ok': True, 'phone': phone, 'demo_code': code, 'existing': existing}
 
 
 @route('POST', '/api/login/verify', auth=False)
@@ -850,15 +860,21 @@ def api_login_verify(req, me, b):
         raise ApiError('รหัสไม่ถูกต้อง')
     ex('DELETE FROM otps WHERE phone=?', (phone,))
     u = q1('SELECT * FROM users WHERE phone=?', (phone,))
+    returning = bool(u)
     if not u:
-        uid = ex('INSERT INTO users(name,phone,created_at) VALUES(?,?,?)', (o['name'], phone, now()))
+        uid = ex('INSERT INTO users(name,phone,created_at) VALUES(?,?,?)', (o['name'] or 'ผู้ใช้ใหม่', phone, now()))
         notify(uid, None, 'ยินดีต้อนรับสู่ดีลชัวร์! ลองสร้างดีลแรกได้เลย (โหมดทดลอง ไม่มีเงินจริง)', 'info')
     else:
-        uid = u['id']
-    tok = secrets.token_urlsafe(32)
-    ex('INSERT INTO sessions(token,user_id,created_at) VALUES(?,?,?)', (tok, uid, now()))
-    req.set_cookie('ds_session', tok)
-    return {'ok': True}
+        uid = u['id']  # ชื่อเดิมจากการสมัครครั้งแรกเสมอ (เปลี่ยนได้ที่หน้าโปรไฟล์)
+    linked = None
+    ps = pending_social(req)
+    if ps:
+        link_identity(uid, ps['provider'], ps['sub'], ps['name'], ps['email'])
+        ex('DELETE FROM pending_social WHERE token=?', (ps['token'],))
+        req.set_cookie('ds_pending', '', clear=True)
+        linked = ps['provider']
+    new_session(req, uid)
+    return {'ok': True, 'returning': returning, 'name': get_user(uid)['name'], 'linked': linked}
 
 
 @route('POST', '/api/logout', auth=False)
@@ -908,13 +924,199 @@ def api_avatar(req, me, b):
     """เปลี่ยนรูปโปรไฟล์: แอปครอปเป็นสี่เหลี่ยมจัตุรัส (512×512) มาให้แล้ว · remove=true = กลับไปใช้รูปเริ่มต้น"""
     if b.get('remove'):
         ex('UPDATE users SET avatar=NULL WHERE id=?', (me['id'],))
+        ex('DELETE FROM avatars WHERE user_id=?', (me['id'],))
         return {'ok': True, 'avatar': None}
     img = b.get('image')
-    if isinstance(img, str) and len(img) > 4 * 1024 * 1024: raise ApiError('รูปใหญ่เกินไป ลองรูปอื่น')
-    files = save_files([img], allow=('image',), max_n=1)
-    if not files: raise ApiError('กรุณาเลือกรูป')
-    ex('UPDATE users SET avatar=? WHERE id=?', (files[0], me['id']))
-    return {'ok': True, 'avatar': files[0]}
+    if not isinstance(img, str) or not img: raise ApiError('กรุณาเลือกรูป')
+    if len(img) > 3 * 1024 * 1024: raise ApiError('รูปใหญ่เกินไป (สูงสุด 2 MB)')
+    return {'ok': True, 'avatar': avatar_store(me['id'], img)}
+
+
+# ---------------- v15.3: รูปโปรไฟล์เก็บใน SQLite + เชื่อมบัญชี Google / LINE / Facebook ----------------
+AVATAR_MAX = 2 * 1024 * 1024
+AVATAR_MAGIC = {'image/jpeg': (b'\xff\xd8\xff',), 'image/png': (b'\x89PNG\r\n\x1a\n',), 'image/webp': (b'RIFF',)}
+
+def avatar_store(uid, data_url):
+    m = re.match(r'^data:(image/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+/=\s]+)$', data_url or '', re.S)
+    if not m: raise ApiError('รองรับเฉพาะรูป JPG / PNG / WebP')
+    mime = m.group(1).replace('jpg', 'jpeg')
+    try: raw = base64.b64decode(m.group(2), validate=False)
+    except Exception: raise ApiError('ไฟล์รูปไม่ถูกต้อง')
+    if len(raw) > AVATAR_MAX: raise ApiError('รูปใหญ่เกินไป (สูงสุด 2 MB)')
+    if not raw.startswith(AVATAR_MAGIC[mime]) or (mime == 'image/webp' and raw[8:12] != b'WEBP'):
+        raise ApiError('ไฟล์ไม่ใช่รูปภาพที่ถูกต้อง')
+    t = int(now())
+    ex('INSERT OR REPLACE INTO avatars(user_id,mime,data,updated_at) VALUES(?,?,?,?)', (uid, mime, raw, t))
+    url = f'/avatar/{uid}?v={t}'
+    ex('UPDATE users SET avatar=? WHERE id=?', (url, uid))
+    return url
+
+
+OAUTH = {
+    'google': dict(label='Google', id_env='GOOGLE_CLIENT_ID', secret_env='GOOGLE_CLIENT_SECRET',
+                   auth='https://accounts.google.com/o/oauth2/v2/auth', token='https://oauth2.googleapis.com/token',
+                   scope='openid email profile'),
+    'line': dict(label='LINE', id_env='LINE_CHANNEL_ID', secret_env='LINE_CHANNEL_SECRET',
+                 auth='https://access.line.me/oauth2/v2.1/authorize', token='https://api.line.me/oauth2/v2.1/token',
+                 scope='profile openid'),
+    'facebook': dict(label='Facebook', id_env='FACEBOOK_APP_ID', secret_env='FACEBOOK_APP_SECRET',
+                     auth='https://www.facebook.com/v19.0/dialog/oauth', token='https://graph.facebook.com/v19.0/oauth/access_token',
+                     scope='public_profile'),
+}
+OAUTH_TEST = os.environ.get('DEALSURE_OAUTH_TEST') == '1'  # เครื่องนักพัฒนาเท่านั้น: ข้ามการเรียก provider จริง (ใช้ในเทสต์)
+PUBLIC_BASE_URL = os.environ.get('PUBLIC_BASE_URL', '').strip().rstrip('/')
+
+def oauth_cfg(p):
+    c = OAUTH.get(p)
+    if not c: return None
+    cid, sec = os.environ.get(c['id_env'], '').strip(), os.environ.get(c['secret_env'], '').strip()
+    return (cid, sec) if cid and sec else None
+
+def oauth_base(req):
+    if PUBLIC_BASE_URL: return PUBLIC_BASE_URL
+    host = req.headers.get('Host', 'localhost')
+    proto = req.headers.get('X-Forwarded-Proto') or ('http' if host.startswith(('localhost', '127.')) else 'https')
+    return f'{proto}://{host}'
+
+def _http_json(url, data=None, headers=None):
+    r = urllib.request.Request(url, data=urlencode(data).encode() if data is not None else None,
+                               headers={'Accept': 'application/json', **(headers or {})})
+    try:
+        with urllib.request.urlopen(r, timeout=20) as resp: return json.load(resp)
+    except (urllib.error.URLError, TimeoutError, ValueError):
+        raise ApiError('เชื่อมต่อผู้ให้บริการไม่สำเร็จ ลองใหม่อีกครั้ง', 502)
+
+def oauth_profile(p, code, redirect_uri):
+    """แลก code เป็น token แล้วอ่านโปรไฟล์ → (sub, name, email, picture) · ไม่ log secret/token"""
+    if OAUTH_TEST and code.startswith('test:'):
+        _, sub, name = (code.split(':', 2) + [''])[:3]
+        return sub, name or 'ผู้ใช้ ' + p, None, None
+    cid, sec = oauth_cfg(p); c = OAUTH[p]
+    tok = _http_json(c['token'], {'grant_type': 'authorization_code', 'code': code, 'redirect_uri': redirect_uri,
+                                  'client_id': cid, 'client_secret': sec})
+    at = tok.get('access_token')
+    if not at: raise ApiError('ผู้ให้บริการไม่อนุญาตการเข้าสู่ระบบ', 400)
+    if p == 'google':
+        u = _http_json('https://openidconnect.googleapis.com/v1/userinfo', headers={'Authorization': 'Bearer ' + at})
+        return u.get('sub'), u.get('name'), u.get('email') if u.get('email_verified') else None, u.get('picture')
+    if p == 'line':
+        u = _http_json('https://api.line.me/v2/profile', headers={'Authorization': 'Bearer ' + at})
+        return u.get('userId'), u.get('displayName'), None, u.get('pictureUrl')
+    u = _http_json('https://graph.facebook.com/v19.0/me?' + urlencode({'fields': 'id,name', 'access_token': at}))
+    return u.get('id'), u.get('name'), None, None
+
+def identities_of(uid):
+    return [dict(provider=r['provider'], label=OAUTH[r['provider']]['label'], name=r['name'], linked_at=r['created_at'])
+            for r in q('SELECT * FROM identities WHERE user_id=? ORDER BY created_at', (uid,)) if r['provider'] in OAUTH]
+
+def link_identity(uid, p, sub, name, email):
+    other = q1('SELECT user_id FROM identities WHERE provider=? AND sub=?', (p, sub))
+    if other and other['user_id'] != uid:
+        raise ApiError(f'บัญชี {OAUTH[p]["label"]} นี้เชื่อมกับเบอร์โทรอื่นอยู่แล้ว', 409)
+    if q1('SELECT 1 FROM identities WHERE user_id=? AND provider=? AND sub<>?', (uid, p, sub)):
+        raise ApiError(f'คุณเชื่อม {OAUTH[p]["label"]} บัญชีอื่นไว้แล้ว ยกเลิกการเชื่อมก่อน', 409)
+    ex('INSERT OR IGNORE INTO identities(provider,sub,user_id,name,email,created_at) VALUES(?,?,?,?,?,?)',
+       (p, sub, uid, s_(name, 60) or None, email, now()))
+
+def new_session(req, uid):
+    tok = secrets.token_urlsafe(32)
+    ex('INSERT INTO sessions(token,user_id,created_at) VALUES(?,?,?)', (tok, uid, now()))
+    req.set_cookie('ds_session', tok)
+
+def pending_social(req):
+    t = req.cookie('ds_pending')
+    if not t: return None
+    r = q1('SELECT * FROM pending_social WHERE token=?', (t,))
+    return r if r and r['expires'] > now() else None
+
+
+@route('GET', '/api/auth/providers', auth=False)
+def api_auth_providers(req, me, b):
+    ps = pending_social(req)
+    return {'providers': [dict(id=k, label=c['label'], enabled=bool(oauth_cfg(k))) for k, c in OAUTH.items()],
+            'pending': dict(provider=ps['provider'], label=OAUTH[ps['provider']]['label'], name=ps['name']) if ps else None}
+
+
+@route('POST', '/api/auth/pending/cancel', auth=False)
+def api_pending_cancel(req, me, b):
+    t = req.cookie('ds_pending')
+    if t: ex('DELETE FROM pending_social WHERE token=?', (t,))
+    req.set_cookie('ds_pending', '', clear=True)
+    return {'ok': True}
+
+
+@route('GET', '/api/me/identities')
+def api_my_identities(req, me, b):
+    return {'identities': identities_of(me['id']), 'phone': me['phone']}
+
+
+@route('POST', '/api/me/identities/unlink')
+def api_unlink(req, me, b):
+    p = s_(b.get('provider'), 20)
+    if p not in OAUTH: raise ApiError('ไม่รู้จักบัญชีนี้')
+    # เบอร์โทรเป็นช่องทางเข้าระบบหลักที่ลบไม่ได้เสมอ → ยกเลิกโซเชียลได้โดยไม่ทำให้เข้าระบบไม่ได้
+    if not me['phone']: raise ApiError('ต้องมีอย่างน้อย 1 ช่องทางในการเข้าสู่ระบบ', 409)
+    ex('DELETE FROM identities WHERE user_id=? AND provider=?', (me['id'], p))
+    return {'ok': True, 'identities': identities_of(me['id'])}
+
+
+def oauth_start(req, p, mode):
+    cfg = oauth_cfg(p)
+    if not cfg: return req.redirect('/app#/login?err=' + p + '_off')
+    me = req.current_user()
+    if mode == 'link' and not me: return req.redirect('/app#/login')
+    state = secrets.token_urlsafe(24)
+    ex('DELETE FROM oauth_states WHERE created_at<?', (now() - 900,))
+    ex('INSERT INTO oauth_states(state,provider,mode,user_id,created_at) VALUES(?,?,?,?,?)',
+       (state, p, mode, me['id'] if mode == 'link' else None, now()))
+    db.commit()
+    req._cookies.append(f'ds_oauth={state}; Path=/auth/; HttpOnly; SameSite=Lax; Max-Age=900'
+                        + ('; Secure' if req.headers.get('X-Forwarded-Proto') == 'https' else ''))
+    c = OAUTH[p]
+    qs = {'response_type': 'code', 'client_id': cfg[0], 'redirect_uri': f'{oauth_base(req)}/auth/{p}/callback',
+          'scope': c['scope'], 'state': state}
+    if p in ('google', 'line'): qs['nonce'] = secrets.token_urlsafe(12)
+    if p == 'google': qs['prompt'] = 'select_account'
+    return req.redirect(c['auth'] + '?' + urlencode(qs))
+
+
+def oauth_callback(req, p, params):
+    back = '/app#/me' 
+    state = params.get('state', [''])[0]
+    st = q1('SELECT * FROM oauth_states WHERE state=?', (state,)) if state else None
+    if not st or st['provider'] != p or req.cookie('ds_oauth') != state or st['created_at'] < now() - 900:
+        return req.redirect('/app#/login?err=state')
+    ex('DELETE FROM oauth_states WHERE state=?', (state,))
+    req._cookies.append('ds_oauth=; Path=/auth/; HttpOnly; SameSite=Lax; Max-Age=0')
+    back = '/app#/me' if st['mode'] == 'link' else '/app#/login'
+    if params.get('error') or not params.get('code'):
+        db.commit(); return req.redirect(back + '?err=cancel')
+    if not oauth_cfg(p): db.commit(); return req.redirect(back + '?err=' + p + '_off')
+    try:
+        sub, name, email, _pic = oauth_profile(p, params['code'][0], f'{oauth_base(req)}/auth/{p}/callback')
+        if not sub: raise ApiError('อ่านข้อมูลบัญชีไม่สำเร็จ')
+        sub = str(sub)
+        if st['mode'] == 'link':
+            me = req.current_user()
+            if not me or me['id'] != st['user_id']: db.commit(); return req.redirect('/app#/login')
+            link_identity(me['id'], p, sub, name, email); db.commit()
+            return req.redirect('/app#/me?linked=' + p)
+        ident = q1('SELECT * FROM identities WHERE provider=? AND sub=?', (p, sub))
+        if ident and get_user(ident['user_id']):
+            new_session(req, ident['user_id']); db.commit()
+            return req.redirect('/app#/?welcome=' + p)
+        # ตัวตนใหม่ → ต้องยืนยันเบอร์โทรก่อนเสมอ (ถ้าเบอร์มีอยู่แล้ว จะผูกเข้ากับผู้ใช้เดิม)
+        t = secrets.token_urlsafe(24)
+        ex('DELETE FROM pending_social WHERE expires<?', (now(),))
+        ex('INSERT INTO pending_social(token,provider,sub,name,email,expires) VALUES(?,?,?,?,?,?)',
+           (t, p, sub, s_(name, 60) or None, email, now() + 1200))
+        db.commit()
+        req.set_cookie('ds_pending', t)
+        return req.redirect('/app#/login?social=' + p)
+    except ApiError as e:
+        db.rollback()
+        code = 'taken' if e.status == 409 else 'fail'
+        return req.redirect(back + '?err=' + code)
 
 
 # v15: สถิติจริงจากฐานข้อมูลเท่านั้น (ไม่นับข้อมูลเดโม) – หน้าแรกซ่อนส่วนนี้จนกว่าดีลสำเร็จถึงเกณฑ์
@@ -2110,13 +2312,20 @@ class H(BaseHTTPRequestHandler):
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(body)))
         self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('Cache-Control', 'no-cache')
+        if 'Cache-Control' not in (extra or {}): self.send_header('Cache-Control', 'no-cache')
         for c in getattr(self, '_cookies', []): self.send_header('Set-Cookie', c)
         for k, v in (extra or {}).items(): self.send_header(k, v)
         self.end_headers()
         if self.command != 'HEAD':
             try: self.wfile.write(body)
             except (BrokenPipeError, ConnectionResetError): pass  # ผู้ใช้ปิดหน้า/เน็ตหลุดระหว่างส่ง
+
+    def redirect(self, to):
+        return self.send(302, b'', 'text/plain', {'Location': to})
+
+    def current_user(self):
+        tok = self.cookie('ds_session')
+        return q1('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?', (tok,)) if tok else None
 
     def do_HEAD(self): self.do_GET()
     def do_GET(self): self.handle_any('GET')
@@ -2183,6 +2392,18 @@ class H(BaseHTTPRequestHandler):
         if path in ('/admin', '/admin/'):
             return self.page('admin.html')
         if path == '/favicon.ico': path = '/static/logo/favicon-32.png'
+        m = re.fullmatch(r'/avatar/(\d+)', path)
+        if m:
+            a = q1('SELECT mime,data FROM avatars WHERE user_id=?', (int(m.group(1)),))
+            if not a: return self.send(404, 'not found', 'text/plain')
+            return self.send(200, bytes(a['data']), a['mime'], {'Cache-Control': 'public, max-age=31536000, immutable'})
+        m = re.fullmatch(r'/auth/(google|line|facebook)/(start|link|callback)', path)
+        if m:
+            from urllib.parse import parse_qs
+            params = parse_qs(urlparse(self.path).query)
+            with LOCK:
+                if m.group(2) == 'callback': return oauth_callback(self, m.group(1), params)
+                return oauth_start(self, m.group(1), m.group(2) if m.group(2) == 'link' else 'login')
         if path.startswith('/uploads/'):
             name = os.path.basename(path)
             return self.file(os.path.join(UPLOADS, name))

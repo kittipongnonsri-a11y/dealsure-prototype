@@ -18,7 +18,7 @@ JPG = 'data:image/jpeg;base64,' + __import__('base64').b64encode(open(os.path.jo
 print('1) รูปโปรไฟล์')
 check('ค่าเริ่มต้นไม่มีรูป (ใช้อักษรย่อ)', ua['avatar'] is None and ua['initial'])
 r = A.ok('/me/avatar', {'image': JPG})
-check('อัปโหลดรูปโปรไฟล์ได้', r['avatar'].startswith('/uploads/') and r['avatar'].endswith('.jpg'))
+check('อัปโหลดรูปโปรไฟล์ได้ (v15.3: เก็บใน SQLite)', r['avatar'].startswith('/avatar/'))
 with urllib.request.urlopen(BASE + r['avatar']) as f:
     check('ไฟล์รูปเปิดได้ (image/jpeg)', f.status == 200 and f.headers['Content-Type'] == 'image/jpeg')
 check('/me มีรูปใหม่', A.ok('/me')['user']['avatar'] == r['avatar'])

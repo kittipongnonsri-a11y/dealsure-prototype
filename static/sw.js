@@ -1,6 +1,6 @@
 /* DealSure service worker v15 – network-first สำหรับหน้า, ไม่แคช API (ข้อมูลดีล/เงินต้องสดเสมอ) */
-const C = 'dealsure-v15.2';
-const SHELL = ['/', '/app', '/static/app.css?v=15.2', '/static/app.js?v=15.2', '/static/icons/icon-192.png', '/manifest.json'];
+const C = 'dealsure-v15.3';
+const SHELL = ['/', '/app', '/static/app.css?v=15.3', '/static/app.js?v=15.3', '/static/icons/icon-192.png', '/manifest.json'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(C).then(c => c.addAll(SHELL)).catch(() => {})); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== C).map(k => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', e => {

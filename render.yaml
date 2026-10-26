@@ -11,5 +11,19 @@ services:
         sync: false
       - key: STRIPE_TEST_SECRET_KEY   # ไม่บังคับ: sk_test_... เปิดจ่ายบัตรผ่าน Stripe test mode (ไม่ตั้ง = เงินจำลอง)
         sync: false
+      - key: GOOGLE_CLIENT_ID   # ไม่บังคับ: เปิดปุ่มเข้าสู่ระบบ/เชื่อมบัญชี (ไม่ตั้ง = ปุ่มปิด)
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET   # ไม่บังคับ: เปิดปุ่มเข้าสู่ระบบ/เชื่อมบัญชี (ไม่ตั้ง = ปุ่มปิด)
+        sync: false
+      - key: LINE_CHANNEL_ID   # ไม่บังคับ: เปิดปุ่มเข้าสู่ระบบ/เชื่อมบัญชี (ไม่ตั้ง = ปุ่มปิด)
+        sync: false
+      - key: LINE_CHANNEL_SECRET   # ไม่บังคับ: เปิดปุ่มเข้าสู่ระบบ/เชื่อมบัญชี (ไม่ตั้ง = ปุ่มปิด)
+        sync: false
+      - key: FACEBOOK_APP_ID   # ไม่บังคับ: เปิดปุ่มเข้าสู่ระบบ/เชื่อมบัญชี (ไม่ตั้ง = ปุ่มปิด)
+        sync: false
+      - key: FACEBOOK_APP_SECRET   # ไม่บังคับ: เปิดปุ่มเข้าสู่ระบบ/เชื่อมบัญชี (ไม่ตั้ง = ปุ่มปิด)
+        sync: false
+      - key: PUBLIC_BASE_URL   # callback = <PUBLIC_BASE_URL>/auth/<provider>/callback
+        value: https://dealsure-q2fh.onrender.com
       - key: PYTHONUNBUFFERED
         value: "1"

@@ -239,11 +239,12 @@ function pagedHtml(key) {
 function pagedMore(key) { const m = MORE[key]; m.n = Math.min(m.items.length, m.n + m.step); $('#pl-' + key).innerHTML = pagedHtml(key); }
 
 /* ---------------- router ---------------- */
-function route() { const h = location.hash.replace(/^#\/?/, ''); const [p, a] = h.split('/'); return {p: p || 'home', a: a ? decodeURIComponent(a) : ''}; }
+function hashQ() { return new URLSearchParams((location.hash.split('?')[1]) || ''); }
+function route() { const h = location.hash.replace(/^#\/?/, '').split('?')[0]; const [p, a] = h.split('/'); return {p: p || 'home', a: a ? decodeURIComponent(a) : ''}; }
 let navDepth = 0;
 function goBack() { if (navDepth > 0) history.back(); else location.hash = '#/'; }
 const PUBLIC = ['login', 'd', 'shop', 'u'];
-const route3 = () => location.hash.replace(/^#\/?/, '').split('/')[2] || '';
+const route3 = () => location.hash.replace(/^#\/?/, '').split('?')[0].split('/')[2] || '';
 async function render() {
   const {p, a} = route();
   closeSheet(); toggleNotif(false); S.deal = null;
@@ -255,7 +256,7 @@ async function render() {
   $$('.tab').forEach(t => t.classList.toggle('on', t.dataset.t === (tabs[p] || (p === 'shop' && S.me && a == S.me.id ? 'shop' : ''))));
   const v = $('#view');
   try {
-    if (p === 'login') vLogin();
+    if (p === 'login') await vLogin();
     else if (p === 'home') await vHome();
     else if (p === 'create') { await loadMe(); await vCreate(); }
     else if (p === 'd') await vDeal(a);
@@ -316,29 +317,44 @@ function renderNotif() {
       <div>${esc(x.text)}<small>${ago(x.created_at)}</small></div></div>`; }).join('') : '<div class="empty">ยังไม่มีการแจ้งเตือน</div>');
 }
 
-/* ---------------- login ---------------- */
-function vLogin(step = 1, data = {}) {
+/* ---------------- login (v15.3: เบอร์โทร = หลัก · ชื่อถามเฉพาะเบอร์ใหม่ · เข้าด้วย Google / LINE / Facebook ได้แต่ต้องยืนยันเบอร์) ---------------- */
+const PROV = {google: {bg: '#fff', fg: '#1F2937', t: 'G', bd: '#DADCE0'}, line: {bg: '#06C755', fg: '#fff', t: 'LINE'}, facebook: {bg: '#1877F2', fg: '#fff', t: 'f'}};
+const provIc = id => `<span class="pic" style="background:${PROV[id].bg};color:${PROV[id].fg}${PROV[id].bd ? ';border:1px solid ' + PROV[id].bd : ''}">${PROV[id].t}</span>`;
+const LOGIN_ERR = {state: 'ลิงก์เข้าสู่ระบบหมดอายุหรือไม่ถูกต้อง ลองใหม่อีกครั้ง', cancel: 'ยกเลิกการเข้าสู่ระบบด้วยโซเชียลแล้ว', fail: 'เชื่อมต่อบัญชีไม่สำเร็จ ลองใหม่อีกครั้ง', taken: 'บัญชีโซเชียลนี้เชื่อมกับเบอร์โทรอื่นอยู่แล้ว'};
+const loginErr = e => e && (LOGIN_ERR[e] || (e.endsWith('_off') ? 'ยังไม่ได้เปิดใช้การเข้าสู่ระบบด้วยบัญชีนี้' : ''));
+async function authInfo() { try { S.auth = await api('/auth/providers'); } catch (e) { S.auth = {providers: [], pending: null}; } return S.auth; }
+function provButtons(list, mode) {
+  return list.map(p => p.enabled
+    ? `<a class="pbtn" href="/auth/${p.id}/${mode === 'link' ? 'link' : 'start'}">${provIc(p.id)}${mode === 'link' ? 'เชื่อม ' : 'เข้าด้วย '}${p.label}</a>`
+    : `<button class="pbtn" disabled aria-disabled="true">${provIc(p.id)}${p.label}<span class="off">ยังไม่เปิด</span></button>`).join('');
+}
+async function vLogin(step = 1, data = {}) {
   const v = $('#view');
+  if (S.me && step === 1) { location.hash = '#/'; return; }
+  const A = step === 1 ? await authInfo() : (S.auth || {providers: [], pending: null});
   S.login = data;
+  const pend = A.pending, err = step === 1 ? loginErr(hashQ().get('err')) : '';
+  const offAll = A.providers.length && A.providers.every(p => !p.enabled);
   const body = step === 1 ? `
+    ${err ? noteHtml('err', err) : ''}
+    ${pend ? `<div class="note ok mt8">${provIc(pend.provider)}<div><b>เกือบเสร็จแล้ว${pend.name ? ' คุณ' + esc(pend.name) : ''}</b><br>ยืนยันเบอร์โทรอีกขั้นเดียว เพื่อเชื่อม ${esc(pend.label)} กับบัญชีดีลชัวร์ของคุณ <button class="link" onclick="pendCancel()">ยกเลิก</button></div></div>` : ''}
     <div class="card">
       <div class="hero-logo"><svg class="lg-sheet" width="64" height="64" role="img" aria-label="โลโก้ดีลชัวร์"><use href="#logoA"/></svg></div>
-      <label class="lb">ชื่อที่ใช้แสดง</label>
-      <input class="input" id="lgName" maxlength="60" placeholder="เช่น สมชาย ใจดี" value="${esc(data.name || '')}" autocomplete="name">
       <label class="lb">เบอร์โทรศัพท์</label>
       <input class="input" id="lgPhone" type="tel" inputmode="numeric" maxlength="12" placeholder="0812345678" value="${esc(data.phone || '')}" autocomplete="tel">
-      <p class="small muted mt8">เราจะส่งรหัส OTP 6 หลักให้คุณ (โหมดทดลอง: แสดงรหัสบนหน้าจอ ไม่ส่ง SMS จริง)</p>
-      <button class="btn primary mt12" id="lgBtn" onclick="loginStart(this)">ขอรหัส OTP</button>
+      <div id="lgNameBox" class="${data.needName ? '' : 'hidden'}">
+        <label class="lb">ชื่อที่ใช้แสดง <span class="opt">(เบอร์ใหม่ · ตั้งครั้งเดียว เปลี่ยนได้ที่โปรไฟล์)</span></label>
+        <input class="input" id="lgName" maxlength="60" placeholder="เช่น สมชาย ใจดี" value="${esc(data.name || '')}" autocomplete="name">
+      </div>
+      <p class="small muted mt8">${data.needName ? 'เบอร์นี้ยังไม่มีบัญชี กรอกชื่อเพื่อสมัครใหม่' : 'เคยใช้แล้ว? กรอกแค่เบอร์ ระบบจะใช้ชื่อเดิมของคุณ'} · รหัส OTP 6 หลัก (โหมดทดลอง: แสดงรหัสบนหน้าจอ ไม่ส่ง SMS จริง)</p>
+      <button class="btn primary mt12" id="lgBtn" onclick="loginStart(this)">${data.needName ? 'สมัครและขอรหัส OTP' : 'ขอรหัส OTP'}</button>
       ${LEGAL_CONSENT}
     </div>
-    <div class="card">
-      <h3>เข้าสู่ระบบด้วยบัญชีอื่น <span class="demo" style="margin-left:auto">เร็ว ๆ นี้</span></h3>
-      <div class="soon">
-        <button disabled><span class="ic" style="background:#06C755">LINE</span>LINE</button>
-        <button disabled><span class="ic" style="background:#1877F2">f</span>Facebook</button>
-      </div>
-      <p class="small muted mt8">การเข้าสู่ระบบด้วย LINE / Facebook จะเปิดให้ใช้ในเวอร์ชันถัดไป</p>
-    </div>` : `
+    ${pend ? '' : `<div class="card" id="socialLogin">
+      <h3>หรือเข้าสู่ระบบด้วย</h3>
+      <div class="pbtns">${provButtons(A.providers, 'login')}</div>
+      <p class="small muted mt8">${ic('lock', 14)} ทุกช่องทางต้อง<b>ยืนยันเบอร์โทร</b>อย่างน้อยครั้งแรก เพื่อความปลอดภัยของเงินในดีล${offAll ? '<br>ปุ่มที่ขึ้นว่า “ยังไม่เปิด” = ผู้ดูแลระบบยังไม่ได้ตั้งค่าการเชื่อมต่อกับบัญชีนั้น' : ''}</p>
+    </div>`}` : `
     <div class="card">
       <h3>${ic('lock', 18)}กรอกรหัส OTP</h3>
       <p class="small muted">ส่งรหัสไปที่ ${esc(data.phone)} แล้ว <button class="link" onclick="vLogin(1, S.login)">เปลี่ยนเบอร์</button></p>
@@ -352,18 +368,24 @@ function vLogin(step = 1, data = {}) {
   v.innerHTML = header({title: 'เข้าสู่ระบบ', sub: 'ซื้อขายกับคนในกลุ่มเฟซ / LINE ได้อย่างสบายใจ เงินถูกพักไว้จนกว่าผู้ซื้อจะได้ของ', right: ''}) +
     `<div class="wrap">${body}<p class="footer-note">ดีลชัวร์ (DealSure) · ต้นแบบสำหรับทดลองใช้ · ไม่มีเงินจริง${legalMini()}</p></div>`;
   if (step === 2) $('#lgCode').addEventListener('keydown', e => { if (e.key === 'Enter') loginVerify($('#lgVerify')); });
+  else { $('#lgPhone').addEventListener('input', () => { if (S.login.needName) { S.login.needName = false; $('#lgNameBox').classList.add('hidden'); } }); if (data.needName) $('#lgName').focus(); }
 }
+function pendCancel() { api('/auth/pending/cancel', {}).then(() => vLogin()); }
 function loginStart(btn) {
   busy(btn, async () => {
-    const name = $('#lgName').value.trim(), phone = $('#lgPhone').value.trim();
+    const phone = $('#lgPhone').value.trim(), name = S.login.needName ? $('#lgName').value.trim() : '';
+    if (S.login.needName && !name) { $('#lgName').focus(); throw new Error('กรุณากรอกชื่อที่ใช้แสดง'); }
     const r = await api('/login/start', {name, phone});
-    vLogin(2, {name, phone: r.phone, code: r.demo_code});
+    if (r.need_name) return vLogin(1, {phone: r.phone, needName: true});
+    vLogin(2, {name, phone: r.phone, code: r.demo_code, existing: r.existing});
   });
 }
 function loginVerify(btn) {
   busy(btn, async () => {
-    await api('/login/verify', {phone: S.login.phone, code: $('#lgCode').value});
-    await loadMe(); toast('เข้าสู่ระบบแล้ว ยินดีต้อนรับ ' + hello(S.me.name));
+    const r = await api('/login/verify', {phone: S.login.phone, code: $('#lgCode').value});
+    await loadMe();
+    const lk = r.linked ? ` · เชื่อม ${({google: 'Google', line: 'LINE', facebook: 'Facebook'})[r.linked]} แล้ว` : '';
+    toast((r.returning ? 'ยินดีต้อนรับกลับ คุณ' + S.me.name : 'สมัครสำเร็จ ยินดีต้อนรับ คุณ' + S.me.name) + lk);
     const to = S.after && !S.after.includes('login') ? S.after : '#/'; S.after = null;
     if (location.hash === to) render(); else location.hash = to;
   });
@@ -1729,7 +1751,7 @@ async function vUser(id) {
 }
 function payPenalty(btn) { busy(btn, async () => { const r = await api('/penalties/pay', {}); toast(`ชำระค่าปรับ ${baht(r.paid)} แล้ว (จำลอง) ✓`); await vMe(); }); }
 async function vMe() {
-  const [pay] = await Promise.all([api('/payouts'), loadMe()]); const u = S.me, s = u.stats;
+  const [pay, A] = await Promise.all([api('/payouts'), authInfo(), loadMe()]); const u = S.me, s = u.stats;
   $('#view').innerHTML = header({title: 'บัญชีของฉัน', sub: 'โปรไฟล์ · ยืนยันตัวตน · เงินที่รอโอน'}) + `<div class="wrap">
     <div class="card"><div class="seller"><button class="av-edit" id="avEdit" aria-label="เปลี่ยนรูปโปรไฟล์" onclick="avatarPick()">${avatar(u, 'lg')}<span class="cam">${ic('camera', 15)}</span></button><div class="grow"><b class="prompt" style="font-size:17px">${esc(u.name)}</b><div class="small muted">${esc(u.phone)}</div>
       <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">${verBadge(u)}${levelBadge(s)}</div></div></div>
@@ -1759,13 +1781,28 @@ async function vMe() {
       <label class="lb">คำอธิบายร้าน <span class="opt">(ไม่บังคับ)</span></label><input class="input" id="meBio" maxlength="200" value="${esc(u.shop_bio)}" placeholder="เช่น ของสะสมวินเทจ · กรุงเทพฯ">
       <button class="btn primary sm mt12" onclick="saveMe(this)">บันทึก</button></div>
     ${socialForm(u)}
-    <div class="card"><h3>เชื่อมต่อบัญชี <span class="demo" style="margin-left:auto">เร็ว ๆ นี้</span></h3>
-      <div class="soon"><button disabled><span class="ic" style="background:#06C755">LINE</span>LINE</button><button disabled><span class="ic" style="background:#1877F2">f</span>Facebook</button></div></div>
+    ${linkedCard(u, A)}
     <div class="card" id="legalCard"><h3>${ic('shield', 18)}ข้อตกลงและนโยบาย</h3>
       <p class="small muted">อ่านกติกาการพักเงิน ค่าธรรมเนียม การแจ้งปัญหา และวิธีที่เราดูแลข้อมูลของคุณ</p>
       <div class="legal-links mt12"><a class="btn ghost sm" href="/terms">ข้อตกลงการใช้บริการ</a><a class="btn ghost sm" href="/privacy">ความเป็นส่วนตัว</a></div></div>
     <button class="btn danger" onclick="logout()">ออกจากระบบ</button>
     <p class="footer-note">ดีลชัวร์ (DealSure) ต้นแบบ · โหมดทดลอง – ไม่มีเงินจริง${legalMini()}</p></div>`;
+}
+function linkedCard(u, A) {
+  const ids = u.identities || [], q = hashQ(), err = loginErr(q.get('err')), ok = q.get('linked');
+  const rows = A.providers.map(p => {
+    const l = ids.find(i => i.provider === p.id);
+    return `<div class="lrow">${provIc(p.id)}<div class="grow"><b>${p.label}</b><div class="small muted">${l ? 'เชื่อมแล้ว' + (l.name ? ' · ' + esc(l.name) : '') : p.enabled ? 'ยังไม่เชื่อม' : 'ยังไม่เปิดใช้ (ผู้ดูแลระบบยังไม่ได้ตั้งค่า)'}</div></div>
+      ${l ? `<button class="btn ghost sm" onclick="unlinkProv('${p.id}', this)">ยกเลิก</button>` : p.enabled ? `<a class="btn primary sm" href="/auth/${p.id}/link">เชื่อม</a>` : `<button class="btn ghost sm" disabled>ปิดอยู่</button>`}</div>`;
+  }).join('');
+  return `<div class="card" id="linkedCard"><h3>${ic('lock', 18)}บัญชีที่เชื่อมต่อ</h3>
+    ${err ? noteHtml('err', err) : ok ? noteHtml('ok', 'เชื่อมบัญชีเรียบร้อย ✓ ครั้งหน้าเข้าสู่ระบบด้วยบัญชีนี้ได้เลย') : ''}
+    <div class="lrow">${ic('brand-phone', 20)}<div class="grow"><b>เบอร์โทร ${esc(u.phone)}</b><div class="small muted">ช่องทางหลัก · ยืนยันแล้ว · ยกเลิกไม่ได้</div></div><span class="badge b-green">หลัก</span></div>
+    ${rows}<p class="small muted mt8">เข้าสู่ระบบด้วยบัญชีที่เชื่อมไว้ได้ทุกช่องทาง โดยบัญชีจะผูกกับเบอร์โทรที่ยืนยันแล้วเสมอ</p></div>`;
+}
+function unlinkProv(p, btn) {
+  if (!confirm('ยกเลิกการเชื่อมบัญชีนี้? (ยังเข้าสู่ระบบด้วยเบอร์โทรได้ตามเดิม)')) return;
+  busy(btn, async () => { await api('/me/identities/unlink', {provider: p}); toast('ยกเลิกการเชื่อมแล้ว'); await vMe(); });
 }
 function saveMe(btn) { busy(btn, async () => { await api('/me/update', {name: $('#meName').value, shop_name: $('#meShop').value, shop_bio: $('#meBio').value}); toast('บันทึกแล้ว ✓'); await vMe(); }); }
 

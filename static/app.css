@@ -753,3 +753,14 @@ label.chk.save-as input{margin-top:3px;flex:none;width:18px;height:18px}
 .tab-gold .tg-c svg{width:28px;height:28px;stroke-width:2.6}
 .tab-gold:active .tg-c{transform:scale(.94)}
 .tab.tab-gold.on{color:#7A4E0B}.tab.tab-gold.on .tg-c{box-shadow:0 0 0 3px rgba(245,184,51,.35),0 8px 18px rgba(200,150,46,.5)}
+
+/* v15.3 social login / linked accounts */
+.pbtns{display:flex;flex-direction:column;gap:8px}
+.pbtn{display:flex;align-items:center;gap:10px;border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:10px 14px;font-family:'Prompt';font-size:14.5px;color:var(--ink,#111);text-decoration:none;font-weight:500}
+.pbtn[disabled]{opacity:.6;color:var(--muted)}
+.pbtn .off{margin-left:auto;font-size:12px;color:var(--muted)}
+.pic{width:26px;height:26px;border-radius:50%;font-size:10.5px;font-weight:700;display:inline-grid;place-items:center;flex:none;font-family:'Prompt'}
+.lrow{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.lrow:first-of-type{border-top:none}
+.hidden{display:none!important}
+.lrow .grow{flex:1 1 auto;min-width:0}.lrow .btn{width:auto!important;flex:0 0 auto!important;margin:0!important;padding:8px 16px!important}
